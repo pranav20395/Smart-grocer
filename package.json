@@ -1,0 +1,12 @@
+{
+  "name": "aussie-saver",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Compare grocery prices across Australian stores",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

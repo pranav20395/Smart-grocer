@@ -1,0 +1,245 @@
+:root {
+  --bg: #f2f4f3;
+  --card: #ffffff;
+  --text: #14221f;
+  --accent: #1e7f5c;
+  --accent-2: #145c43;
+  --muted: #667d75;
+  --danger: #b42318;
+  --radius: 14px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Avenir Next", Avenir, "Segoe UI", sans-serif;
+  color: var(--text);
+  background: radial-gradient(circle at top left, #d8efe6, var(--bg));
+}
+
+header,
+footer {
+  text-align: center;
+  padding: 1rem;
+}
+
+header h1 {
+  margin: 0;
+}
+
+header p {
+  margin: 0.4rem 0 0;
+  color: var(--muted);
+}
+
+main {
+  width: min(960px, 92vw);
+  margin: 0 auto 2rem;
+  display: grid;
+  gap: 1rem;
+}
+
+.card {
+  background: var(--card);
+  border-radius: var(--radius);
+  padding: 1rem;
+  box-shadow: 0 10px 24px rgba(16, 24, 40, 0.07);
+}
+
+h2 {
+  margin-top: 0;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem;
+}
+
+.toolbar {
+  margin-top: 0.75rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.65rem;
+  padding: 0.7rem;
+  border: 1px solid #d5e2dd;
+  border-radius: 10px;
+  background: #f8fcfa;
+}
+
+.checkline {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: 1.4rem;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.92rem;
+}
+
+input,
+select,
+button {
+  border-radius: 10px;
+  border: 1px solid #c8d4cf;
+  padding: 0.62rem;
+  font: inherit;
+}
+
+button {
+  background: var(--accent);
+  color: white;
+  border: none;
+  margin-top: 0.75rem;
+  cursor: pointer;
+}
+
+button:hover {
+  background: var(--accent-2);
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.list-item {
+  border: 1px solid #d6e1dd;
+  border-radius: 10px;
+  padding: 0.7rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.list-item span.done {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+
+.actions {
+  display: flex;
+  gap: 0.45rem;
+}
+
+.actions button {
+  margin-top: 0;
+  padding: 0.45rem 0.6rem;
+}
+
+.actions .remove {
+  background: var(--danger);
+}
+
+#comparison {
+  margin-top: 0.8rem;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.status {
+  margin-top: 0.7rem;
+  color: var(--muted);
+}
+
+.row {
+  border: 1px solid #d9e4e0;
+  border-radius: 10px;
+  padding: 0.65rem;
+}
+
+.result-row {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.result-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.result-actions button {
+  margin-top: 0;
+}
+
+.result-actions a {
+  color: var(--accent-2);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.table-wrap {
+  overflow-x: auto;
+  margin-top: 0.75rem;
+}
+
+.results-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 720px;
+}
+
+.results-table th,
+.results-table td {
+  text-align: left;
+  padding: 0.55rem;
+  border-bottom: 1px solid #d9e4e0;
+  vertical-align: top;
+}
+
+.results-table th {
+  background: #f0f6f3;
+}
+
+.details-card summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.inner-section {
+  margin-top: 0.9rem;
+  padding-top: 0.8rem;
+  border-top: 1px dashed #d6e1dd;
+}
+
+.results-table button {
+  margin-top: 0;
+  margin-right: 0.35rem;
+  padding: 0.4rem 0.52rem;
+}
+
+.chip {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 0.18rem 0.55rem;
+  font-size: 0.82rem;
+  background: #eef2f1;
+  color: #304340;
+}
+
+.chip-up {
+  background: #fdecec;
+  color: #9b1c1c;
+}
+
+.chip-down {
+  background: #e8f7ed;
+  color: #136f3a;
+}
+
+small {
+  color: var(--muted);
+}

@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: aussie-saver
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    autoDeploy: true
+    envVars:
+      - key: RAPIDAPI_KEY
+        sync: false
+      - key: RAPIDAPI_KEY_COLES
+        sync: false
+      - key: RAPIDAPI_KEY_WOOLWORTHS
+        sync: false
+      - key: RAPIDAPI_KEY_ALDI
+        sync: false
