@@ -551,11 +551,17 @@ async function fetchNearbyOutlets(lat, lng, radiusKm, limit) {
   const areaToken =
     address.suburb || address.city || address.town || address.state_district || address.state || "Australia";
 
-  const brands = ["Coles", "Woolworths", "ALDI", "Kmart", "Big W"];
+  const brandQueries = [
+    { store: "Coles", terms: ["Coles", "Coles supermarket"] },
+    { store: "Woolworths", terms: ["Woolworths", "Woolworths supermarket"] },
+    { store: "Aldi", terms: ["ALDI", "Aldi supermarket", "ALDI Australia"] },
+    { store: "Kmart", terms: ["Kmart", "Kmart store"] },
+    { store: "Big W", terms: ["Big W", "Big W store"] }
+  ];
   const results = [];
   const fallbackCandidates = [];
   const seen = new Set();
-  const perBrandLimit = Math.min(Math.max(Math.ceil(limit / brands.length) + 2, 3), 10);
+  const perBrandLimit = Math.min(Math.max(Math.ceil(limit / brandQueries.length) + 2, 3), 10);
   const latDelta = radiusKm / 111;
   const lonDelta = radiusKm / (111 * Math.max(Math.cos((lat * Math.PI) / 180), 0.2));
   const minLat = lat - latDelta;
@@ -564,35 +570,41 @@ async function fetchNearbyOutlets(lat, lng, radiusKm, limit) {
   const maxLon = lng + lonDelta;
   const viewbox = `${minLon},${maxLat},${maxLon},${minLat}`;
 
-  for (const brand of brands) {
-    const q = encodeURIComponent(`${brand} ${areaToken}`);
-    const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&bounded=1&viewbox=${encodeURIComponent(viewbox)}&q=${q}&limit=${perBrandLimit}`;
-    const response = await fetchJsonWithTimeout(url, 5000);
-    if (!response.ok || !Array.isArray(response.data)) continue;
+  for (const brand of brandQueries) {
+    for (const term of brand.terms) {
+      const queryVariants = [`${term} ${areaToken}`, `${term} Australia`];
+      for (const queryText of queryVariants) {
+        const q = encodeURIComponent(queryText);
+        const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&bounded=1&viewbox=${encodeURIComponent(viewbox)}&q=${q}&limit=${perBrandLimit}`;
+        const response = await fetchJsonWithTimeout(url, 5000);
+        if (!response.ok || !Array.isArray(response.data)) continue;
 
-    for (const place of response.data) {
-      const pLat = Number(place.lat);
-      const pLng = Number(place.lon);
-      if (!Number.isFinite(pLat) || !Number.isFinite(pLng)) continue;
+        for (const place of response.data) {
+          const pLat = Number(place.lat);
+          const pLng = Number(place.lon);
+          if (!Number.isFinite(pLat) || !Number.isFinite(pLng)) continue;
 
-      const distanceKm = haversineKm(lat, lng, pLat, pLng);
-      const key = `${place.osm_type || "x"}-${place.osm_id || `${pLat}-${pLng}`}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
+          const distanceKm = haversineKm(lat, lng, pLat, pLng);
+          const key = `${place.osm_type || "x"}-${place.osm_id || `${pLat}-${pLng}`}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
 
-      const name = place.name || brand;
-      const normalized = {
-        name,
-        store: guessStore(`${name} ${brand}`),
-        latitude: pLat,
-        longitude: pLng,
-        distance_km: Number(distanceKm.toFixed(2)),
-        address: place.display_name || "",
-        within_radius: distanceKm <= radiusKm
-      };
+          const name = place.name || term;
+          const detectedStore = guessStore(`${name} ${place.display_name || ""} ${term}`);
+          const normalized = {
+            name,
+            store: detectedStore === "Other" ? brand.store : detectedStore,
+            latitude: pLat,
+            longitude: pLng,
+            distance_km: Number(distanceKm.toFixed(2)),
+            address: place.display_name || "",
+            within_radius: distanceKm <= radiusKm
+          };
 
-      fallbackCandidates.push(normalized);
-      if (distanceKm <= radiusKm) results.push(normalized);
+          fallbackCandidates.push(normalized);
+          if (distanceKm <= radiusKm) results.push(normalized);
+        }
+      }
     }
   }
 
