@@ -239,8 +239,14 @@ function normalizeOffer(item, store, source = "api") {
     }
   }
 
-  const slug = item.urlSlugText || item.url_slug || item.slug || "";
-  const aldiUrl = slug ? `https://www.aldi.com.au${String(slug).startsWith("/") ? "" : "/"}${slug}` : null;
+  const slug = String(item.urlSlugText || item.url_slug || item.slug || "").replace(/^\/+/, "");
+  const sku = String(item.sku || "").trim();
+  let aldiUrl = null;
+  if (slug && sku) {
+    aldiUrl = `https://www.aldi.com.au/product/${slug}-${sku}`;
+  } else if (slug) {
+    aldiUrl = `https://www.aldi.com.au/product/${slug}`;
+  }
 
   const offer = {
     store,
