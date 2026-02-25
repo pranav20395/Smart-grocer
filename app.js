@@ -8,10 +8,21 @@ const state = {
   visibleOffers: [],
   compareSummary: null,
   newsResults: [],
-  outletsResults: []
+  outletsResults: [],
+  user: null,
+  cloudEnabled: false,
+  cloudSyncError: null,
+  lastCloudSyncAt: null
 };
 
 const els = {
+  authForm: document.getElementById("auth-form"),
+  authEmail: document.getElementById("auth-email"),
+  authPassword: document.getElementById("auth-password"),
+  authSignIn: document.getElementById("auth-signin"),
+  authSignUp: document.getElementById("auth-signup"),
+  authSignOut: document.getElementById("auth-signout"),
+  authStatus: document.getElementById("auth-status"),
   colesSearchForm: document.getElementById("coles-search-form"),
   colesSearchQuery: document.getElementById("coles-search-query"),
   colesSearchLimit: document.getElementById("coles-search-limit"),
@@ -53,6 +64,9 @@ const els = {
   recalculate: document.getElementById("recalculate")
 };
 
+let supabaseClient = null;
+let cloudSaveTimer = null;
+
 function uid() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
@@ -61,7 +75,7 @@ function formatMoney(n) {
   return new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD" }).format(n);
 }
 
-function load() {
+function loadLocal() {
   const raw = localStorage.getItem(STORAGE_KEY);
   if (!raw) return;
   try {
@@ -74,8 +88,242 @@ function load() {
   }
 }
 
-function save() {
+function saveLocal() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({ items: state.items, prices: state.prices }));
+}
+
+function save() {
+  saveLocal();
+  scheduleCloudSave();
+}
+
+function getSupabaseConfig() {
+  const config = window.APP_CONFIG || {};
+  const url = config.SUPABASE_URL || "";
+  const anon = config.SUPABASE_ANON_KEY || "";
+  return { url: String(url).trim(), anon: String(anon).trim() };
+}
+
+function setAuthStatus(message) {
+  if (els.authStatus) els.authStatus.textContent = message;
+}
+
+function updateAuthUI() {
+  const signedIn = Boolean(state.user);
+  if (els.authSignOut) els.authSignOut.style.display = signedIn ? "inline-block" : "none";
+  if (!signedIn) {
+    setAuthStatus(state.cloudEnabled ? "Not signed in. Using local data." : "Supabase not configured. Using local data.");
+    return;
+  }
+  const syncPart = state.cloudSyncError
+    ? ` | Sync error: ${state.cloudSyncError}`
+    : state.lastCloudSyncAt
+      ? ` | Synced at ${new Date(state.lastCloudSyncAt).toLocaleTimeString()}`
+      : " | Sync pending";
+  setAuthStatus(`Signed in as ${state.user.email}${syncPart}`);
+}
+
+async function initSupabase() {
+  const { url, anon } = getSupabaseConfig();
+  if (!url || !anon || !window.supabase?.createClient) {
+    state.cloudEnabled = false;
+    updateAuthUI();
+    return;
+  }
+
+  supabaseClient = window.supabase.createClient(url, anon);
+  state.cloudEnabled = true;
+
+  const {
+    data: { session }
+  } = await supabaseClient.auth.getSession();
+
+  state.user = session?.user || null;
+  updateAuthUI();
+
+  if (state.user) {
+    try {
+      await loadCloudData();
+      state.cloudSyncError = null;
+    } catch (error) {
+      state.cloudSyncError = error.message || "Unable to load cloud data";
+    }
+    render();
+  }
+
+  supabaseClient.auth.onAuthStateChange(async (_event, sessionData) => {
+    state.user = sessionData?.user || null;
+    state.cloudSyncError = null;
+    updateAuthUI();
+    if (state.user) {
+      try {
+        await loadCloudData();
+        state.cloudSyncError = null;
+      } catch (error) {
+        state.cloudSyncError = error.message || "Unable to load cloud data";
+      }
+      render();
+    }
+  });
+}
+
+async function signIn(email, password) {
+  if (!supabaseClient) throw new Error("Supabase not configured.");
+  const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+  if (error) throw error;
+}
+
+async function signUp(email, password) {
+  if (!supabaseClient) throw new Error("Supabase not configured.");
+  const { error } = await supabaseClient.auth.signUp({ email, password });
+  if (error) throw error;
+}
+
+async function signOut() {
+  if (!supabaseClient) return;
+  const { error } = await supabaseClient.auth.signOut();
+  if (error) throw error;
+}
+
+function serializeItemsForCloud() {
+  if (!state.user) return [];
+  return state.items.map((item) => ({
+    user_id: state.user.id,
+    client_id: item.id,
+    name: item.name,
+    category: item.category,
+    quantity: item.quantity,
+    done: Boolean(item.done)
+  }));
+}
+
+function serializePricesForCloud() {
+  if (!state.user) return [];
+  return state.prices.map((price) => ({
+    user_id: state.user.id,
+    client_id: price.id,
+    item_client_id: price.itemId,
+    store: price.store,
+    price: price.price,
+    source: price.source || "manual",
+    updated_at: price.updatedAt || new Date().toISOString()
+  }));
+}
+
+async function saveCloudData() {
+  if (!supabaseClient || !state.user) return;
+
+  const pricesRows = serializePricesForCloud();
+  const itemRows = serializeItemsForCloud();
+  const userId = state.user.id;
+
+  const existingItemsRes = await supabaseClient.from("shopping_items").select("client_id").eq("user_id", userId);
+  if (existingItemsRes.error) throw existingItemsRes.error;
+
+  const existingPricesRes = await supabaseClient.from("item_prices").select("client_id").eq("user_id", userId);
+  if (existingPricesRes.error) throw existingPricesRes.error;
+
+  if (itemRows.length > 0) {
+    const upsertItems = await supabaseClient.from("shopping_items").upsert(itemRows, {
+      onConflict: "user_id,client_id"
+    });
+    if (upsertItems.error) throw upsertItems.error;
+  } else {
+    const clearItems = await supabaseClient.from("shopping_items").delete().eq("user_id", userId);
+    if (clearItems.error) throw clearItems.error;
+  }
+
+  if (pricesRows.length > 0) {
+    const upsertPrices = await supabaseClient.from("item_prices").upsert(pricesRows, {
+      onConflict: "user_id,client_id"
+    });
+    if (upsertPrices.error) throw upsertPrices.error;
+  } else {
+    const clearPrices = await supabaseClient.from("item_prices").delete().eq("user_id", userId);
+    if (clearPrices.error) throw clearPrices.error;
+  }
+
+  const itemKeep = new Set(itemRows.map((row) => row.client_id));
+  const itemDeleteIds = (existingItemsRes.data || []).map((row) => row.client_id).filter((id) => !itemKeep.has(id));
+  if (itemDeleteIds.length > 0) {
+    const cleanupItems = await supabaseClient
+      .from("shopping_items")
+      .delete()
+      .eq("user_id", userId)
+      .in("client_id", itemDeleteIds);
+    if (cleanupItems.error) throw cleanupItems.error;
+  }
+
+  const priceKeep = new Set(pricesRows.map((row) => row.client_id));
+  const priceDeleteIds = (existingPricesRes.data || []).map((row) => row.client_id).filter((id) => !priceKeep.has(id));
+  if (priceDeleteIds.length > 0) {
+    const cleanupPrices = await supabaseClient
+      .from("item_prices")
+      .delete()
+      .eq("user_id", userId)
+      .in("client_id", priceDeleteIds);
+    if (cleanupPrices.error) throw cleanupPrices.error;
+  }
+
+  state.lastCloudSyncAt = new Date().toISOString();
+  state.cloudSyncError = null;
+}
+
+function scheduleCloudSave() {
+  if (!state.user || !supabaseClient) return;
+  if (cloudSaveTimer) clearTimeout(cloudSaveTimer);
+
+  cloudSaveTimer = setTimeout(async () => {
+    try {
+      await saveCloudData();
+      updateAuthUI();
+    } catch (error) {
+      state.cloudSyncError = error.message || "Cloud sync failed";
+      updateAuthUI();
+      console.error("Cloud sync failed", error);
+    }
+  }, 500);
+}
+
+async function loadCloudData() {
+  if (!supabaseClient || !state.user) return;
+
+  const itemsRes = await supabaseClient
+    .from("shopping_items")
+    .select("client_id,name,category,quantity,done")
+    .eq("user_id", state.user.id)
+    .order("created_at", { ascending: true });
+
+  if (itemsRes.error) throw itemsRes.error;
+
+  const pricesRes = await supabaseClient
+    .from("item_prices")
+    .select("client_id,item_client_id,store,price,source,updated_at")
+    .eq("user_id", state.user.id)
+    .order("updated_at", { ascending: false });
+
+  if (pricesRes.error) throw pricesRes.error;
+
+  state.items = (itemsRes.data || []).map((row) => ({
+    id: row.client_id,
+    name: row.name,
+    category: row.category || "General",
+    quantity: Number(row.quantity) || 1,
+    done: Boolean(row.done)
+  }));
+
+  state.prices = (pricesRes.data || []).map((row) => ({
+    id: row.client_id,
+    itemId: row.item_client_id,
+    store: row.store,
+    price: Number(row.price),
+    source: row.source || "manual",
+    updatedAt: row.updated_at || new Date().toISOString()
+  }));
+
+  saveLocal();
+  state.lastCloudSyncAt = new Date().toISOString();
+  state.cloudSyncError = null;
 }
 
 function addItem(name, category, quantity) {
@@ -165,6 +413,7 @@ function renderItems() {
 }
 
 function renderPriceItemOptions() {
+  if (!els.priceItem) return;
   const prev = els.priceItem.value;
   els.priceItem.innerHTML = "";
 
@@ -569,7 +818,44 @@ function render() {
   renderCompareSummary();
   renderNewsResults();
   renderOutletsResults();
+  updateAuthUI();
 }
+
+els.authSignIn?.addEventListener("click", async () => {
+  const email = els.authEmail.value.trim();
+  const password = els.authPassword.value;
+  if (!email || !password) return;
+  try {
+    setAuthStatus("Signing in...");
+    await signIn(email, password);
+  } catch (error) {
+    setAuthStatus(`Sign in failed: ${error.message}`);
+  }
+});
+
+els.authSignUp?.addEventListener("click", async () => {
+  const email = els.authEmail.value.trim();
+  const password = els.authPassword.value;
+  if (!email || !password) return;
+  try {
+    setAuthStatus("Creating account...");
+    await signUp(email, password);
+    setAuthStatus("Account created. Check email if confirmation is required.");
+  } catch (error) {
+    setAuthStatus(`Sign up failed: ${error.message}`);
+  }
+});
+
+els.authSignOut?.addEventListener("click", async () => {
+  try {
+    await signOut();
+    setAuthStatus("Signed out. Using local data.");
+  } catch (error) {
+    setAuthStatus(`Sign out failed: ${error.message}`);
+  }
+});
+
+els.authForm?.addEventListener("submit", (e) => e.preventDefault());
 
 els.colesSearchForm.addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -755,25 +1041,32 @@ els.itemForm.addEventListener("submit", (e) => {
   els.itemQuantity.value = "1";
 });
 
-els.priceForm.addEventListener("submit", (e) => {
-  e.preventDefault();
-  const itemId = els.priceItem.value;
-  const store = els.priceStore.value;
-  const price = Number(els.priceValue.value);
-  if (!itemId || !store || !Number.isFinite(price) || price < 0) return;
+if (els.priceForm) {
+  els.priceForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const itemId = els.priceItem?.value;
+    const store = els.priceStore?.value;
+    const price = Number(els.priceValue?.value);
+    if (!itemId || !store || !Number.isFinite(price) || price < 0) return;
 
-  setPrice(itemId, store, price, "manual");
-  els.priceValue.value = "";
-});
+    setPrice(itemId, store, price, "manual");
+    els.priceValue.value = "";
+  });
+}
 
 els.recalculate.addEventListener("click", renderComparison);
 
-load();
-if (!els.liveDate.value) {
-  els.liveDate.value = new Date().toISOString().slice(0, 10);
-}
-render();
+async function bootstrap() {
+  loadLocal();
+  if (!els.liveDate.value) {
+    els.liveDate.value = new Date().toISOString().slice(0, 10);
+  }
+  render();
+  await initSupabase();
 
-setTimeout(() => {
-  els.newsForm.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
-}, 0);
+  setTimeout(() => {
+    els.newsForm.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
+  }, 0);
+}
+
+bootstrap();

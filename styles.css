@@ -1,12 +1,13 @@
 :root {
-  --bg: #f2f4f3;
+  --bg: #f4f6f4;
   --card: #ffffff;
-  --text: #14221f;
-  --accent: #1e7f5c;
-  --accent-2: #145c43;
-  --muted: #667d75;
+  --text: #12231f;
+  --accent: #0f7a67;
+  --accent-2: #0a5b4d;
+  --muted: #627872;
   --danger: #b42318;
-  --radius: 14px;
+  --line: #d8e2de;
+  --radius: 16px;
 }
 
 * {
@@ -17,17 +18,21 @@ body {
   margin: 0;
   font-family: "Avenir Next", Avenir, "Segoe UI", sans-serif;
   color: var(--text);
-  background: radial-gradient(circle at top left, #d8efe6, var(--bg));
+  background:
+    radial-gradient(circle at 10% -10%, #bce5d8 0%, transparent 40%),
+    radial-gradient(circle at 100% 10%, #d7ece4 0%, transparent 35%),
+    var(--bg);
 }
 
 header,
 footer {
   text-align: center;
-  padding: 1rem;
+  padding: 1rem 1rem 0.9rem;
 }
 
 header h1 {
   margin: 0;
+  letter-spacing: 0.01em;
 }
 
 header p {
@@ -37,16 +42,17 @@ header p {
 
 main {
   width: min(960px, 92vw);
-  margin: 0 auto 2rem;
+  margin: 0 auto 2.2rem;
   display: grid;
-  gap: 1rem;
+  gap: 0.9rem;
 }
 
 .card {
   background: var(--card);
   border-radius: var(--radius);
   padding: 1rem;
-  box-shadow: 0 10px 24px rgba(16, 24, 40, 0.07);
+  border: 1px solid #e6ece9;
+  box-shadow: 0 14px 24px rgba(16, 24, 40, 0.07);
 }
 
 h2 {
@@ -65,9 +71,25 @@ h2 {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 0.65rem;
   padding: 0.7rem;
-  border: 1px solid #d5e2dd;
+  border: 1px solid var(--line);
   border-radius: 10px;
   background: #f8fcfa;
+}
+
+.auth-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.75rem;
+}
+
+.secondary {
+  background: #e6efeb;
+  color: #1f3730;
+}
+
+.secondary:hover {
+  background: #d4e4dd;
 }
 
 .checkline {
@@ -89,8 +111,8 @@ input,
 select,
 button {
   border-radius: 10px;
-  border: 1px solid #c8d4cf;
-  padding: 0.62rem;
+  border: 1px solid #c7d4cf;
+  padding: 0.68rem 0.7rem;
   font: inherit;
 }
 
@@ -98,8 +120,9 @@ button {
   background: var(--accent);
   color: white;
   border: none;
-  margin-top: 0.75rem;
+  margin-top: 0.7rem;
   cursor: pointer;
+  font-weight: 600;
 }
 
 button:hover {
@@ -152,10 +175,11 @@ button:hover {
 .status {
   margin-top: 0.7rem;
   color: var(--muted);
+  font-size: 0.92rem;
 }
 
 .row {
-  border: 1px solid #d9e4e0;
+  border: 1px solid var(--line);
   border-radius: 10px;
   padding: 0.65rem;
 }
@@ -196,12 +220,66 @@ button:hover {
 .results-table td {
   text-align: left;
   padding: 0.55rem;
-  border-bottom: 1px solid #d9e4e0;
+  border-bottom: 1px solid var(--line);
   vertical-align: top;
 }
 
 .results-table th {
   background: #f0f6f3;
+}
+
+.card h2 {
+  font-size: 1.05rem;
+}
+
+@media (max-width: 760px) {
+  main {
+    width: min(100%, 96vw);
+    gap: 0.75rem;
+    margin-bottom: 1.2rem;
+  }
+
+  .card {
+    padding: 0.85rem;
+    border-radius: 14px;
+  }
+
+  .grid,
+  .toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-actions {
+    flex-direction: column;
+    gap: 0.45rem;
+  }
+
+  button,
+  .auth-actions button {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .checkline {
+    margin-top: 0.2rem;
+  }
+
+  .list-item {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .actions {
+    width: 100%;
+  }
+
+  .actions button {
+    flex: 1;
+  }
+
+  .results-table {
+    min-width: 640px;
+  }
 }
 
 .details-card summary {

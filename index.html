@@ -14,6 +14,28 @@
 
     <main>
       <section class="card">
+        <h2>Account</h2>
+        <form id="auth-form">
+          <div class="grid">
+            <label>
+              Email
+              <input id="auth-email" type="email" placeholder="you@example.com" />
+            </label>
+            <label>
+              Password
+              <input id="auth-password" type="password" placeholder="Minimum 6 characters" />
+            </label>
+          </div>
+          <div class="auth-actions">
+            <button type="button" id="auth-signin">Sign In</button>
+            <button type="button" id="auth-signup" class="secondary">Sign Up</button>
+            <button type="button" id="auth-signout" class="secondary">Sign Out</button>
+          </div>
+        </form>
+        <div id="auth-status" class="status"></div>
+      </section>
+
+      <section class="card">
         <h2>Find Cheapest Items</h2>
         <form id="coles-search-form">
           <div class="grid">
@@ -91,33 +113,6 @@
           <button type="submit">Add Item</button>
         </form>
         <ul id="shopping-list" class="list"></ul>
-      </section>
-
-      <section class="card">
-        <h2>Add / Update Price</h2>
-        <form id="price-form">
-          <div class="grid">
-            <label>
-              Item
-              <select id="price-item" required></select>
-            </label>
-            <label>
-              Store
-              <select id="price-store" required>
-                <option value="Coles">Coles</option>
-                <option value="Woolworths">Woolworths</option>
-                <option value="Aldi">Aldi</option>
-                <option value="Kmart">Kmart</option>
-                <option value="Big W">Big W</option>
-              </select>
-            </label>
-            <label>
-              Price (AUD)
-              <input id="price-value" type="number" step="0.01" min="0" required placeholder="4.99" />
-            </label>
-          </div>
-          <button type="submit">Save Price</button>
-        </form>
       </section>
 
       <section class="card">
@@ -200,9 +195,11 @@
     </main>
 
     <footer>
-      <small>Data stays on your device (local browser storage).</small>
+      <small>Use login to sync your list across devices.</small>
     </footer>
 
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="config.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
