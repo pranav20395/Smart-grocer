@@ -10,19 +10,24 @@ const state = {
   newsResults: [],
   outletsResults: [],
   user: null,
+  guestMode: false,
   cloudEnabled: false,
   cloudSyncError: null,
   lastCloudSyncAt: null
 };
 
 const els = {
+  authScreen: document.getElementById("auth-screen"),
+  appShell: document.getElementById("app-shell"),
   authForm: document.getElementById("auth-form"),
   authEmail: document.getElementById("auth-email"),
   authPassword: document.getElementById("auth-password"),
   authSignIn: document.getElementById("auth-signin"),
   authSignUp: document.getElementById("auth-signup"),
+  authGuest: document.getElementById("auth-guest"),
   authSignOut: document.getElementById("auth-signout"),
   authStatus: document.getElementById("auth-status"),
+  topNav: document.getElementById("top-nav"),
   colesSearchForm: document.getElementById("coles-search-form"),
   colesSearchQuery: document.getElementById("coles-search-query"),
   colesSearchLimit: document.getElementById("coles-search-limit"),
@@ -108,13 +113,61 @@ function setAuthStatus(message) {
   if (els.authStatus) els.authStatus.textContent = message;
 }
 
+function setShellVisibility(showApp) {
+  if (els.authScreen) {
+    els.authScreen.hidden = showApp;
+    els.authScreen.classList.toggle("is-hidden", showApp);
+  }
+  if (els.appShell) {
+    els.appShell.hidden = !showApp;
+    els.appShell.classList.toggle("is-hidden", !showApp);
+  }
+}
+
+function switchPanel(panelId) {
+  document.querySelectorAll(".app-panel").forEach((panel) => {
+    panel.hidden = panel.id !== panelId;
+  });
+
+  if (els.topNav) {
+    els.topNav.querySelectorAll(".nav-btn").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.panel === panelId);
+    });
+  }
+}
+
+function getRouteMode() {
+  return window.location.hash === "#/app" ? "app" : "login";
+}
+
+function setRouteMode(mode) {
+  const nextHash = mode === "app" ? "#/app" : "#/login";
+  if (window.location.hash !== nextHash) {
+    history.replaceState(null, "", nextHash);
+  }
+}
+
 function updateAuthUI() {
   const signedIn = Boolean(state.user);
+  const inApp = signedIn || state.guestMode;
+
   if (els.authSignOut) els.authSignOut.style.display = signedIn ? "inline-block" : "none";
-  if (!signedIn) {
-    setAuthStatus(state.cloudEnabled ? "Not signed in. Using local data." : "Supabase not configured. Using local data.");
+
+  if (!inApp) {
+    setRouteMode("login");
+    setShellVisibility(false);
+    setAuthStatus(state.cloudEnabled ? "Sign in to sync your data." : "Supabase not configured. Use guest mode.");
     return;
   }
+
+  setRouteMode("app");
+  setShellVisibility(true);
+
+  if (state.guestMode && !signedIn) {
+    setAuthStatus("Guest mode: data will stay only on this device.");
+    return;
+  }
+
   const syncPart = state.cloudSyncError
     ? ` | Sync error: ${state.cloudSyncError}`
     : state.lastCloudSyncAt
@@ -139,6 +192,7 @@ async function initSupabase() {
   } = await supabaseClient.auth.getSession();
 
   state.user = session?.user || null;
+  state.guestMode = false;
   updateAuthUI();
 
   if (state.user) {
@@ -153,6 +207,7 @@ async function initSupabase() {
 
   supabaseClient.auth.onAuthStateChange(async (_event, sessionData) => {
     state.user = sessionData?.user || null;
+    state.guestMode = false;
     state.cloudSyncError = null;
     updateAuthUI();
     if (state.user) {
@@ -169,8 +224,9 @@ async function initSupabase() {
 
 async function signIn(email, password) {
   if (!supabaseClient) throw new Error("Supabase not configured.");
-  const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+  const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
   if (error) throw error;
+  return data;
 }
 
 async function signUp(email, password) {
@@ -827,7 +883,15 @@ els.authSignIn?.addEventListener("click", async () => {
   if (!email || !password) return;
   try {
     setAuthStatus("Signing in...");
-    await signIn(email, password);
+    const data = await signIn(email, password);
+    if (data?.user) {
+      state.user = data.user;
+      state.guestMode = false;
+      setRouteMode("app");
+      updateAuthUI();
+      render();
+      window.scrollTo({ top: 0, behavior: "instant" });
+    }
   } catch (error) {
     setAuthStatus(`Sign in failed: ${error.message}`);
   }
@@ -848,10 +912,34 @@ els.authSignUp?.addEventListener("click", async () => {
 
 els.authSignOut?.addEventListener("click", async () => {
   try {
-    await signOut();
-    setAuthStatus("Signed out. Using local data.");
+    if (supabaseClient && state.user) {
+      await signOut();
+    }
+    state.user = null;
+    state.guestMode = false;
+    updateAuthUI();
   } catch (error) {
     setAuthStatus(`Sign out failed: ${error.message}`);
+  }
+});
+
+els.authGuest?.addEventListener("click", () => {
+  state.guestMode = true;
+  updateAuthUI();
+});
+
+els.topNav?.addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-panel]");
+  if (!btn) return;
+  switchPanel(btn.dataset.panel);
+});
+
+window.addEventListener("hashchange", () => {
+  const mode = getRouteMode();
+  if (mode === "app" && (state.user || state.guestMode)) {
+    setShellVisibility(true);
+  } else if (mode === "login") {
+    setShellVisibility(false);
   }
 });
 
@@ -1058,10 +1146,19 @@ els.recalculate.addEventListener("click", renderComparison);
 
 async function bootstrap() {
   loadLocal();
+  if (!window.location.hash) {
+    setRouteMode("login");
+  }
+
   if (!els.liveDate.value) {
     els.liveDate.value = new Date().toISOString().slice(0, 10);
   }
+
+  const routeMode = getRouteMode();
+  setShellVisibility(routeMode === "app");
+
   render();
+  switchPanel("panel-compare");
   await initSupabase();
 
   setTimeout(() => {

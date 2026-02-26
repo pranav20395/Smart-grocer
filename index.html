@@ -7,16 +7,14 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <header>
-      <h1>Aussie Saver</h1>
-      <p>Plan your shopping and compare prices across Australian stores.</p>
-    </header>
+    <section id="auth-screen" class="auth-screen">
+      <div class="auth-card">
+        <p class="eyebrow">Aussie Saver</p>
+        <h1>Smart grocery planning for students</h1>
+        <p class="auth-sub">Compare prices, save lists, and find nearby stores with one simple app.</p>
 
-    <main>
-      <section class="card">
-        <h2>Account</h2>
         <form id="auth-form">
-          <div class="grid">
+          <div class="grid auth-grid">
             <label>
               Email
               <input id="auth-email" type="email" placeholder="you@example.com" />
@@ -28,175 +26,196 @@
           </div>
           <div class="auth-actions">
             <button type="button" id="auth-signin">Sign In</button>
-            <button type="button" id="auth-signup" class="secondary">Sign Up</button>
-            <button type="button" id="auth-signout" class="secondary">Sign Out</button>
+            <button type="button" id="auth-signup" class="secondary">Create Account</button>
+            <button type="button" id="auth-guest" class="ghost">Continue as Guest</button>
           </div>
         </form>
         <div id="auth-status" class="status"></div>
-      </section>
+      </div>
+    </section>
 
-      <section class="card">
-        <h2>Find Cheapest Items</h2>
-        <form id="coles-search-form">
-          <div class="grid">
-            <label>
-              Product Search
-              <input id="coles-search-query" required placeholder="milk, cheese sticks, coffee beans..." />
-            </label>
-            <label>
-              Max Results
-              <input id="coles-search-limit" type="number" min="1" max="50" value="10" />
-            </label>
-          </div>
-          <button type="submit">Compare Prices</button>
-        </form>
-        <div class="toolbar">
-          <label>
-            Sort
-            <select id="compare-sort">
-              <option value="price_asc">Cheapest First</option>
-              <option value="price_desc">Most Expensive First</option>
-              <option value="name_asc">Name A-Z</option>
-              <option value="store_asc">Store A-Z</option>
-            </select>
-          </label>
-          <label>
-            Store
-            <select id="compare-store">
-              <option value="all">All Stores</option>
-              <option value="Coles">Coles</option>
-              <option value="Woolworths">Woolworths</option>
-              <option value="Aldi">Aldi</option>
-            </select>
-          </label>
-          <label>
-            Category
-            <select id="compare-category">
-              <option value="all">All Categories</option>
-              <option value="dairy">Dairy</option>
-              <option value="fruit_veg">Fruit & Veg</option>
-              <option value="bakery">Bakery</option>
-              <option value="pantry">Pantry</option>
-              <option value="beverages">Beverages</option>
-              <option value="snacks">Snacks</option>
-              <option value="household">Household</option>
-              <option value="other">Other</option>
-            </select>
-          </label>
-          <label class="checkline">
-            <input id="cheapest-only" type="checkbox" />
-            Show only cheapest option per product
-          </label>
+    <div id="app-shell" class="app-shell" hidden>
+      <header class="app-header">
+        <div>
+          <h1>Aussie Saver</h1>
+          <p>Find best prices, manage your list, and shop smarter.</p>
         </div>
-        <div id="coles-search-status" class="status"></div>
-        <div id="compare-summary"></div>
-        <div id="coles-search-results"></div>
-      </section>
+        <button type="button" id="auth-signout" class="secondary">Sign Out</button>
+      </header>
 
-      <section class="card">
-        <h2>My Shopping List</h2>
-        <form id="item-form">
-          <div class="grid">
-            <label>
-              Item Name
-              <input id="item-name" required placeholder="Milk" />
-            </label>
-            <label>
-              Category
-              <input id="item-category" placeholder="Groceries" />
-            </label>
-            <label>
-              Quantity
-              <input id="item-quantity" type="number" min="1" value="1" required />
-            </label>
-          </div>
-          <button type="submit">Add Item</button>
-        </form>
-        <ul id="shopping-list" class="list"></ul>
-      </section>
+      <nav class="top-nav" id="top-nav">
+        <button type="button" data-panel="panel-compare" class="nav-btn active">Compare</button>
+        <button type="button" data-panel="panel-list" class="nav-btn">My List</button>
+        <button type="button" data-panel="panel-plan" class="nav-btn">Price Plan</button>
+        <button type="button" data-panel="panel-tools" class="nav-btn">Tools</button>
+      </nav>
 
-      <section class="card">
-        <h2>Best Price Plan</h2>
-        <button id="recalculate">Recalculate</button>
-        <div id="comparison"></div>
-      </section>
-
-      <details class="card details-card">
-        <summary>Advanced Tools</summary>
-        <section class="inner-section">
-          <h2>Price Change News (Last 7 Days)</h2>
-          <form id="news-form">
+      <main>
+        <section id="panel-compare" class="card app-panel">
+          <h2>Find Cheapest Items</h2>
+          <form id="coles-search-form">
             <div class="grid">
               <label>
-                Keyword (optional)
-                <input id="news-query" placeholder="cheese, coffee, milk..." />
-              </label>
-              <label>
-                Days
-                <input id="news-days" type="number" min="1" max="14" value="7" required />
-              </label>
-              <label>
-                Max Stories
-                <input id="news-limit" type="number" min="1" max="100" value="25" required />
-              </label>
-            </div>
-            <button type="submit">Refresh News</button>
-          </form>
-          <div id="news-status" class="status"></div>
-          <div id="news-results"></div>
-        </section>
-
-        <section class="inner-section">
-          <h2>Nearby Outlets</h2>
-          <form id="outlets-form">
-            <div class="grid">
-              <label>
-                Radius (km)
-                <input id="outlets-radius" type="number" min="1" max="25" value="5" required />
+                Product Search
+                <input id="coles-search-query" required placeholder="milk, rice, bananas..." />
               </label>
               <label>
                 Max Results
-                <input id="outlets-limit" type="number" min="1" max="50" value="15" required />
+                <input id="coles-search-limit" type="number" min="1" max="50" value="10" />
               </label>
             </div>
-            <button type="button" id="use-location">Use My Location</button>
+            <button type="submit">Compare Prices</button>
           </form>
-          <div id="outlets-status" class="status"></div>
-          <div id="outlets-results"></div>
+          <div class="toolbar">
+            <label>
+              Sort
+              <select id="compare-sort">
+                <option value="price_asc">Cheapest First</option>
+                <option value="price_desc">Most Expensive First</option>
+                <option value="name_asc">Name A-Z</option>
+                <option value="store_asc">Store A-Z</option>
+              </select>
+            </label>
+            <label>
+              Store
+              <select id="compare-store">
+                <option value="all">All Stores</option>
+                <option value="Coles">Coles</option>
+                <option value="Woolworths">Woolworths</option>
+                <option value="Aldi">Aldi</option>
+              </select>
+            </label>
+            <label>
+              Category
+              <select id="compare-category">
+                <option value="all">All Categories</option>
+                <option value="dairy">Dairy</option>
+                <option value="fruit_veg">Fruit & Veg</option>
+                <option value="bakery">Bakery</option>
+                <option value="pantry">Pantry</option>
+                <option value="beverages">Beverages</option>
+                <option value="snacks">Snacks</option>
+                <option value="household">Household</option>
+                <option value="other">Other</option>
+              </select>
+            </label>
+            <label class="checkline">
+              <input id="cheapest-only" type="checkbox" />
+              Cheapest only
+            </label>
+          </div>
+          <div id="coles-search-status" class="status"></div>
+          <div id="compare-summary"></div>
+          <div id="coles-search-results"></div>
         </section>
 
-        <section class="inner-section">
-          <h2>Live Coles Price Changes</h2>
-          <form id="live-prices-form">
+        <section id="panel-list" class="card app-panel" hidden>
+          <h2>My Shopping List</h2>
+          <form id="item-form">
             <div class="grid">
               <label>
-                Date
-                <input id="live-date" type="date" required />
+                Item Name
+                <input id="item-name" required placeholder="Milk" />
               </label>
               <label>
-                Page
-                <input id="live-page" type="number" min="1" value="1" required />
+                Category
+                <input id="item-category" placeholder="Groceries" />
               </label>
               <label>
-                Page Size
-                <input id="live-page-size" type="number" min="1" max="100" value="20" required />
-              </label>
-              <label>
-                Search Product (optional)
-                <input id="live-query" placeholder="coffee, milk, coles brand..." />
+                Quantity
+                <input id="item-quantity" type="number" min="1" value="1" required />
               </label>
             </div>
-            <button type="submit">Fetch Live Prices</button>
+            <button type="submit">Add Item</button>
           </form>
-          <div id="live-status" class="status"></div>
-          <div id="live-results" class="list"></div>
+          <ul id="shopping-list" class="list"></ul>
         </section>
-      </details>
-    </main>
 
-    <footer>
-      <small>Use login to sync your list across devices.</small>
-    </footer>
+        <section id="panel-plan" class="card app-panel" hidden>
+          <h2>Best Price Plan</h2>
+          <button id="recalculate">Recalculate</button>
+          <div id="comparison"></div>
+        </section>
+
+        <section id="panel-tools" class="card app-panel" hidden>
+          <details class="details-card" open>
+            <summary>Advanced Tools</summary>
+            <section class="inner-section">
+              <h2>Price Change News (Last 7 Days)</h2>
+              <form id="news-form">
+                <div class="grid">
+                  <label>
+                    Keyword (optional)
+                    <input id="news-query" placeholder="cheese, coffee, milk..." />
+                  </label>
+                  <label>
+                    Days
+                    <input id="news-days" type="number" min="1" max="14" value="7" required />
+                  </label>
+                  <label>
+                    Max Stories
+                    <input id="news-limit" type="number" min="1" max="100" value="25" required />
+                  </label>
+                </div>
+                <button type="submit">Refresh News</button>
+              </form>
+              <div id="news-status" class="status"></div>
+              <div id="news-results"></div>
+            </section>
+
+            <section class="inner-section">
+              <h2>Nearby Outlets</h2>
+              <form id="outlets-form">
+                <div class="grid">
+                  <label>
+                    Radius (km)
+                    <input id="outlets-radius" type="number" min="1" max="25" value="5" required />
+                  </label>
+                  <label>
+                    Max Results
+                    <input id="outlets-limit" type="number" min="1" max="50" value="15" required />
+                  </label>
+                </div>
+                <button type="button" id="use-location">Use My Location</button>
+              </form>
+              <div id="outlets-status" class="status"></div>
+              <div id="outlets-results"></div>
+            </section>
+
+            <section class="inner-section">
+              <h2>Live Coles Price Changes</h2>
+              <form id="live-prices-form">
+                <div class="grid">
+                  <label>
+                    Date
+                    <input id="live-date" type="date" required />
+                  </label>
+                  <label>
+                    Page
+                    <input id="live-page" type="number" min="1" value="1" required />
+                  </label>
+                  <label>
+                    Page Size
+                    <input id="live-page-size" type="number" min="1" max="100" value="20" required />
+                  </label>
+                  <label>
+                    Search Product (optional)
+                    <input id="live-query" placeholder="coffee, milk, coles brand..." />
+                  </label>
+                </div>
+                <button type="submit">Fetch Live Prices</button>
+              </form>
+              <div id="live-status" class="status"></div>
+              <div id="live-results" class="list"></div>
+            </section>
+          </details>
+        </section>
+      </main>
+
+      <footer>
+        <small>Use login to sync your list across devices.</small>
+      </footer>
+    </div>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="config.js"></script>
