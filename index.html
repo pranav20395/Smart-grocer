@@ -46,7 +46,6 @@
       <nav class="top-nav" id="top-nav">
         <button type="button" data-panel="panel-compare" class="nav-btn active">Compare</button>
         <button type="button" data-panel="panel-list" class="nav-btn">My List</button>
-        <button type="button" data-panel="panel-plan" class="nav-btn">Price Plan</button>
         <button type="button" data-panel="panel-tools" class="nav-btn">Tools</button>
       </nav>
 
@@ -129,12 +128,12 @@
             <button type="submit">Add Item</button>
           </form>
           <ul id="shopping-list" class="list"></ul>
-        </section>
 
-        <section id="panel-plan" class="card app-panel" hidden>
-          <h2>Best Price Plan</h2>
-          <button id="recalculate">Recalculate</button>
-          <div id="comparison"></div>
+          <section class="list-plan-block">
+            <h3>Best Price Plan</h3>
+            <button id="recalculate">Recalculate</button>
+            <div id="comparison"></div>
+          </section>
         </section>
 
         <section id="panel-tools" class="card app-panel" hidden>
@@ -180,33 +179,6 @@
               </form>
               <div id="outlets-status" class="status"></div>
               <div id="outlets-results"></div>
-            </section>
-
-            <section class="inner-section">
-              <h2>Live Coles Price Changes</h2>
-              <form id="live-prices-form">
-                <div class="grid">
-                  <label>
-                    Date
-                    <input id="live-date" type="date" required />
-                  </label>
-                  <label>
-                    Page
-                    <input id="live-page" type="number" min="1" value="1" required />
-                  </label>
-                  <label>
-                    Page Size
-                    <input id="live-page-size" type="number" min="1" max="100" value="20" required />
-                  </label>
-                  <label>
-                    Search Product (optional)
-                    <input id="live-query" placeholder="coffee, milk, coles brand..." />
-                  </label>
-                </div>
-                <button type="submit">Fetch Live Prices</button>
-              </form>
-              <div id="live-status" class="status"></div>
-              <div id="live-results" class="list"></div>
             </section>
           </details>
         </section>

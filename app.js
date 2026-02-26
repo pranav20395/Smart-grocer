@@ -3,7 +3,6 @@ const STORAGE_KEY = "aussie-saver-v1";
 const state = {
   items: [],
   prices: [],
-  liveResults: [],
   searchOffers: [],
   visibleOffers: [],
   compareSummary: null,
@@ -49,13 +48,6 @@ const els = {
   useLocation: document.getElementById("use-location"),
   outletsStatus: document.getElementById("outlets-status"),
   outletsResults: document.getElementById("outlets-results"),
-  livePricesForm: document.getElementById("live-prices-form"),
-  liveDate: document.getElementById("live-date"),
-  livePage: document.getElementById("live-page"),
-  livePageSize: document.getElementById("live-page-size"),
-  liveQuery: document.getElementById("live-query"),
-  liveStatus: document.getElementById("live-status"),
-  liveResults: document.getElementById("live-results"),
   itemForm: document.getElementById("item-form"),
   itemName: document.getElementById("item-name"),
   itemCategory: document.getElementById("item-category"),
@@ -78,6 +70,15 @@ function uid() {
 
 function formatMoney(n) {
   return new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD" }).format(n);
+}
+
+function escapeHtml(text) {
+  return String(text || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function loadLocal() {
@@ -539,29 +540,78 @@ function renderComparison() {
     return;
   }
 
+  const entries = Object.entries(storeTotals).sort((a, b) => a[1] - b[1]);
+  const bestSingleStore = entries[0] || null;
+  const pricedCount = rows.filter((row) => row.type === "best").length;
+  const missingRows = rows.filter((row) => row.type === "missing");
+  const savingsVsSingle =
+    bestSingleStore && Number.isFinite(bestSingleStore[1]) ? Number((bestSingleStore[1] - mixedTotal).toFixed(2)) : null;
+
+  const analyticsHtml = [
+    `<div class='analytics-card'><span>Total Items</span><strong>${activeCount}</strong></div>`,
+    `<div class='analytics-card'><span>Priced Items</span><strong>${pricedCount}</strong></div>`,
+    `<div class='analytics-card'><span>Missing Prices</span><strong>${missingRows.length}</strong></div>`,
+    `<div class='analytics-card'><span>Mixed Total</span><strong>${formatMoney(mixedTotal)}</strong></div>`,
+    `<div class='analytics-card'><span>Best Single Store</span><strong>${bestSingleStore ? `${bestSingleStore[0]} ${formatMoney(bestSingleStore[1])}` : "N/A"}</strong></div>`,
+    `<div class='analytics-card'><span>Save vs Single Store</span><strong>${Number.isFinite(savingsVsSingle) ? formatMoney(Math.max(savingsVsSingle, 0)) : "N/A"}</strong></div>`
+  ].join("");
+
+  els.comparison.innerHTML += `<div class='analytics-grid'>${analyticsHtml}</div>`;
+
+  const storeGroups = new Map();
   for (const row of rows) {
-    const div = document.createElement("div");
-    div.className = "row";
-    if (row.type === "missing") {
-      div.textContent = `${row.item.name}: no prices yet.`;
-    } else {
-      div.textContent = `${row.item.name}: best at ${row.store} for ${formatMoney(row.price)} each (${row.source || "manual"})`;
+    if (row.type !== "best") continue;
+    if (!storeGroups.has(row.store)) {
+      storeGroups.set(row.store, { items: [], total: 0 });
     }
-    els.comparison.appendChild(div);
+
+    const lineTotal = row.price * row.item.quantity;
+    const group = storeGroups.get(row.store);
+    group.items.push({
+      name: row.item.name,
+      quantity: row.item.quantity,
+      lineTotal,
+      price: row.price
+    });
+    group.total += lineTotal;
   }
 
-  const mixed = document.createElement("div");
-  mixed.className = "row";
-  mixed.innerHTML = `<strong>Mixed-store total:</strong> ${formatMoney(mixedTotal)}`;
-  els.comparison.appendChild(mixed);
+  const storeOrder = ["Aldi", "Coles", "Woolworths", "Big W", "Kmart"];
+  const sortedStores = [...storeGroups.keys()].sort((a, b) => {
+    const ai = storeOrder.indexOf(a);
+    const bi = storeOrder.indexOf(b);
+    if (ai === -1 && bi === -1) return a.localeCompare(b);
+    if (ai === -1) return 1;
+    if (bi === -1) return -1;
+    return ai - bi;
+  });
 
-  const entries = Object.entries(storeTotals).sort((a, b) => a[1] - b[1]);
-  if (entries.length === 0) {
-    els.comparison.innerHTML += "<div class='row'>No single store has prices for all active items yet.</div>";
+  if (sortedStores.length === 0) {
+    els.comparison.innerHTML += "<div class='row'>No priced items yet. Add prices from search to build store trips.</div>";
   } else {
-    for (const [store, total] of entries) {
-      els.comparison.innerHTML += `<div class='row'><strong>${store} total:</strong> ${formatMoney(total)}</div>`;
+    for (const store of sortedStores) {
+      const group = storeGroups.get(store);
+      const itemRows = group.items
+        .map(
+          (item) =>
+            `<li>${escapeHtml(item.name)} x${item.quantity} <span>${formatMoney(item.price)} each</span> <strong>${formatMoney(item.lineTotal)}</strong></li>`
+        )
+        .join("");
+
+      els.comparison.innerHTML += `<div class='store-trip'>
+        <div class='store-trip-head'>
+          <h4>${escapeHtml(store)} Trip</h4>
+          <span>${group.items.length} item(s)</span>
+          <strong>${formatMoney(group.total)}</strong>
+        </div>
+        <ul>${itemRows}</ul>
+      </div>`;
     }
+  }
+
+  if (missingRows.length > 0) {
+    const missingList = missingRows.map((row) => `<li>${escapeHtml(row.item.name)} x${row.item.quantity}</li>`).join("");
+    els.comparison.innerHTML += `<div class='row'><strong>Need prices:</strong><ul class='missing-list'>${missingList}</ul></div>`;
   }
 }
 
@@ -593,15 +643,6 @@ async function fetchNearbyOutlets(lat, lng, radiusKm, limit) {
   const res = await fetch(`/api/outlets/nearby?${params.toString()}`);
   const payload = await res.json();
   if (!res.ok) throw new Error(payload.error || "Outlet search failed");
-  return payload;
-}
-
-async function fetchLiveColesPrices(date, page, pageSize, query) {
-  const params = new URLSearchParams({ date, page: String(page), page_size: String(pageSize) });
-  if (query) params.set("q", query);
-  const res = await fetch(`/api/coles/price-changes?${params.toString()}`);
-  const payload = await res.json();
-  if (!res.ok) throw new Error(payload.error || "Live fetch failed");
   return payload;
 }
 
@@ -819,57 +860,10 @@ function renderOutletsResults() {
   </table></div>`;
 }
 
-function renderLiveResults() {
-  els.liveResults.innerHTML = "";
-  if (state.liveResults.length === 0) return;
-
-  for (const result of state.liveResults) {
-    const productName = result.product_name || "Unknown product";
-    const newPrice = Number(result.new_price);
-    const oldPrice = Number(result.old_price);
-
-    const row = document.createElement("div");
-    row.className = "row result-row";
-
-    const line = document.createElement("div");
-    const newTxt = Number.isFinite(newPrice) ? formatMoney(newPrice) : "N/A";
-    const oldTxt = Number.isFinite(oldPrice) ? formatMoney(oldPrice) : "N/A";
-    line.innerHTML = `<strong>${productName}</strong><br/>Now: ${newTxt} | Before: ${oldTxt}`;
-
-    const actions = document.createElement("div");
-    actions.className = "result-actions";
-
-    const importBtn = document.createElement("button");
-    importBtn.type = "button";
-    importBtn.textContent = "Import to My List";
-    importBtn.disabled = !Number.isFinite(newPrice);
-    importBtn.addEventListener("click", () => {
-      const item = addItem(productName, "Groceries", 1);
-      setPrice(item.id, "Coles", newPrice, "coles-price-changes");
-      els.liveStatus.textContent = `Imported ${productName} at ${formatMoney(newPrice)}.`;
-    });
-
-    actions.appendChild(importBtn);
-
-    if (result.url) {
-      const link = document.createElement("a");
-      link.href = result.url;
-      link.target = "_blank";
-      link.rel = "noreferrer";
-      link.textContent = "Open Product";
-      actions.appendChild(link);
-    }
-
-    row.append(line, actions);
-    els.liveResults.appendChild(row);
-  }
-}
-
 function render() {
   renderItems();
   renderPriceItemOptions();
   renderComparison();
-  renderLiveResults();
   renderSearchOffers();
   renderCompareSummary();
   renderNewsResults();
@@ -1096,26 +1090,6 @@ els.useLocation.addEventListener("click", async () => {
   }
 });
 
-els.livePricesForm.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const date = els.liveDate.value;
-  const page = Number(els.livePage.value);
-  const pageSize = Number(els.livePageSize.value);
-  const query = els.liveQuery.value.trim();
-  if (!date || !Number.isFinite(page) || page < 1 || !Number.isFinite(pageSize) || pageSize < 1) return;
-
-  try {
-    els.liveStatus.textContent = "Fetching live prices...";
-    const payload = await fetchLiveColesPrices(date, page, pageSize, query);
-    state.liveResults = Array.isArray(payload.results) ? payload.results : [];
-    els.liveStatus.textContent = `Fetched ${state.liveResults.length} price-change result(s).`;
-    renderLiveResults();
-  } catch (err) {
-    state.liveResults = [];
-    renderLiveResults();
-    els.liveStatus.textContent = `Fetch failed: ${err.message}`;
-  }
-});
 
 els.itemForm.addEventListener("submit", (e) => {
   e.preventDefault();
@@ -1148,10 +1122,6 @@ async function bootstrap() {
   loadLocal();
   if (!window.location.hash) {
     setRouteMode("login");
-  }
-
-  if (!els.liveDate.value) {
-    els.liveDate.value = new Date().toISOString().slice(0, 10);
   }
 
   const routeMode = getRouteMode();
