@@ -802,9 +802,19 @@ async function fetchNearbyOutlets(lat, lng, radiusKm, limit) {
     radius_km: String(radiusKm),
     limit: String(limit)
   });
-  const res = await fetch(`/api/outlets/nearby?${params.toString()}`);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12000);
+  let res;
+  try {
+    res = await fetch('/api/outlets/nearby?' + params.toString(), { signal: controller.signal });
+  } catch (error) {
+    clearTimeout(timer);
+    if (error?.name === 'AbortError') throw new Error('Outlet search timed out. Please try again.');
+    throw error;
+  }
+  clearTimeout(timer);
   const payload = await res.json();
-  if (!res.ok) throw new Error(payload.error || "Outlet search failed");
+  if (!res.ok) throw new Error(payload.error || 'Outlet search failed');
   return payload;
 }
 
@@ -976,19 +986,25 @@ function markStoreTripBought(store) {
 }
 
 async function planRouteForTrips() {
-  if (!navigator.geolocation) throw new Error("Geolocation not supported.");
+  if (!navigator.geolocation) throw new Error('Geolocation not supported.');
+  const byStore = buildStoreTripGroups();
+  if (byStore.size === 0) {
+    state.routeData = [];
+    renderRouteSummary();
+    return;
+  }
+
   const pos = await new Promise((resolve, reject) =>
     navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 })
   );
 
   const payload = await fetchNearbyOutlets(pos.coords.latitude, pos.coords.longitude, Number(els.outletsRadius?.value || 8), 30);
-  const byStore = buildStoreTripGroups();
 
   const routeRows = [];
   for (const [store, items] of byStore.entries()) {
     const nearest = (payload.results || []).find((x) => String(x.store).toLowerCase() === store.toLowerCase());
     const maps = nearest
-      ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${nearest.latitude},${nearest.longitude}`)}`
+      ? 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(nearest.latitude + ',' + nearest.longitude)
       : null;
 
     routeRows.push({
@@ -1006,7 +1022,7 @@ async function planRouteForTrips() {
 function renderRouteSummary() {
   if (!els.routeSummary) return;
   if (!Array.isArray(state.routeData) || state.routeData.length === 0) {
-    els.routeSummary.innerHTML = "";
+    els.routeSummary.innerHTML = "<div class='row'>No store route yet. Add prices to items, then tap Auto Route by Store.</div>";
     return;
   }
 

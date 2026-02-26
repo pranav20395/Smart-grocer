@@ -676,11 +676,11 @@ async function fetchNearbyOutlets(lat, lng, radiusKm, limit) {
     address.suburb || address.city || address.town || address.state_district || address.state || "Australia";
 
   const brandQueries = [
-    { store: "Coles", terms: ["Coles", "Coles supermarket"] },
-    { store: "Woolworths", terms: ["Woolworths", "Woolworths supermarket"] },
-    { store: "Aldi", terms: ["ALDI", "Aldi supermarket", "ALDI Australia"] },
-    { store: "Kmart", terms: ["Kmart", "Kmart store"] },
-    { store: "Big W", terms: ["Big W", "Big W store"] }
+    { store: "Coles", terms: ["Coles"] },
+    { store: "Woolworths", terms: ["Woolworths"] },
+    { store: "Aldi", terms: ["ALDI"] },
+    { store: "Kmart", terms: ["Kmart"] },
+    { store: "Big W", terms: ["Big W"] }
   ];
   const results = [];
   const fallbackCandidates = [];
@@ -696,11 +696,11 @@ async function fetchNearbyOutlets(lat, lng, radiusKm, limit) {
 
   for (const brand of brandQueries) {
     for (const term of brand.terms) {
-      const queryVariants = [`${term} ${areaToken}`, `${term} Australia`];
+      const queryVariants = [term + " " + areaToken];
       for (const queryText of queryVariants) {
         const q = encodeURIComponent(queryText);
         const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&bounded=1&viewbox=${encodeURIComponent(viewbox)}&q=${q}&limit=${perBrandLimit}`;
-        const response = await fetchJsonWithTimeout(url, 5000);
+        const response = await fetchJsonWithTimeout(url, 3500);
         if (!response.ok || !Array.isArray(response.data)) continue;
 
         for (const place of response.data) {
