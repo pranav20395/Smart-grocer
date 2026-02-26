@@ -40,7 +40,6 @@
           <h1>Aussie Saver</h1>
           <p>Find best prices, manage your list, and shop smarter.</p>
         </div>
-        <button type="button" id="auth-signout" class="secondary">Sign Out</button>
       </header>
 
       <nav class="top-nav" id="top-nav">
@@ -65,6 +64,9 @@
             </div>
             <button type="submit">Compare Prices</button>
           </form>
+
+          <div id="recent-searches" class="recent-searches"></div>
+
           <div class="toolbar">
             <label>
               Sort
@@ -73,6 +75,7 @@
                 <option value="price_desc">Most Expensive First</option>
                 <option value="name_asc">Name A-Z</option>
                 <option value="store_asc">Store A-Z</option>
+                <option value="unit_price_asc">Best Unit Price</option>
               </select>
             </label>
             <label>
@@ -104,6 +107,9 @@
             </label>
           </div>
           <div id="coles-search-status" class="status"></div>
+          <div id="compare-loading" class="loading-skeleton" hidden>
+            <div></div><div></div><div></div>
+          </div>
           <div id="compare-summary"></div>
           <div id="coles-search-results"></div>
         </section>
@@ -124,15 +130,47 @@
                 Quantity
                 <input id="item-quantity" type="number" min="1" value="1" required />
               </label>
+              <label>
+                Target Price (optional)
+                <input id="item-target-price" type="number" min="0" step="0.01" placeholder="e.g. 2.50" />
+              </label>
             </div>
             <button type="submit">Add Item</button>
           </form>
           <ul id="shopping-list" class="list"></ul>
 
           <section class="list-plan-block">
+            <h3>Budget Planner</h3>
+            <form id="budget-form" class="grid budget-grid">
+              <label>
+                Budget Amount (AUD)
+                <input id="budget-amount" type="number" min="0" step="0.01" placeholder="80" />
+              </label>
+              <label>
+                Period
+                <select id="budget-period">
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
+                </select>
+              </label>
+              <button type="submit">Save Budget</button>
+            </form>
+            <div id="budget-status" class="status"></div>
+          </section>
+
+          <section class="list-plan-block">
             <h3>Best Price Plan</h3>
-            <button id="recalculate">Recalculate</button>
+            <div class="plan-actions">
+              <button id="recalculate">Recalculate</button>
+              <button id="route-plan" type="button" class="secondary">Auto Route by Store</button>
+            </div>
             <div id="comparison"></div>
+            <div id="route-summary"></div>
+          </section>
+
+          <section class="list-plan-block">
+            <h3>Price History Insights</h3>
+            <div id="price-history-insights"></div>
           </section>
         </section>
 
@@ -179,6 +217,12 @@
               </form>
               <div id="outlets-status" class="status"></div>
               <div id="outlets-results"></div>
+            </section>
+
+            <section class="inner-section" id="tools-account">
+              <h2>Account</h2>
+              <p class="status">Manage your session from here.</p>
+              <button type="button" id="auth-signout" class="danger-outline">Log Out</button>
             </section>
           </details>
         </section>

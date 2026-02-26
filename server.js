@@ -144,6 +144,109 @@ function filterOffersByCategory(offers, category) {
   return offers.filter((offer) => offer.category === category);
 }
 
+const FOOD_INTENT_TOKENS = new Set([
+  "milk",
+  "cheese",
+  "yoghurt",
+  "yogurt",
+  "butter",
+  "cream",
+  "banana",
+  "apple",
+  "bread",
+  "rice",
+  "eggs",
+  "oat",
+  "oatmilk"
+]);
+
+const NON_GROCERY_TOKENS = new Set([
+  "bag", "bags", "slider", "resealable", "freezer", "garbage", "bin",
+  "bottle", "bottles", "cleaner", "detergent", "soap", "shampoo", "toilet", "tissue", "foil", "wrap", "biscuit", "biscuits", "cookie", "cookies", "cracker", "crackers", "arrowroot", "lolly", "lollies", "candy"
+]);
+
+function queryTokens(query) {
+  return normalizeText(query).split(" ").filter((t) => t && t.length > 1);
+}
+
+function tokenSet(text) {
+  return new Set(normalizeText(text).split(" ").filter(Boolean));
+}
+
+function hasToken(text, token) {
+  return tokenSet(text).has(token);
+}
+
+function scoreOfferForQuery(offer, query, tokens) {
+  const name = String(offer.product_name || "");
+  const brand = String(offer.product_brand || "");
+  const size = String(offer.product_size || "");
+  const hay = normalizeText(name + " " + brand + " " + size);
+  const fullQ = normalizeText(query);
+  const nameNorm = normalizeText(name);
+  if (!tokens.length) return -1;
+
+  let score = 0;
+  const hayTokens = tokenSet(hay);
+  const allTokensFound = tokens.every((t) => hayTokens.has(t));
+  if (!allTokensFound) return -1;
+
+  if (nameNorm === fullQ) score += 200;
+  if (nameNorm.startsWith(fullQ + " ") || nameNorm === fullQ) score += 90;
+  if (hasToken(nameNorm, tokens[0])) score += 45;
+  if (hay.includes(fullQ)) score += 40;
+  score += tokens.length * 10;
+
+  const hasFoodIntent = tokens.some((t) => FOOD_INTENT_TOKENS.has(t));
+  const hasNonGroceryWord = [...NON_GROCERY_TOKENS].some((t) => hayTokens.has(t));
+  const category = String(offer.category || "other");
+
+  if (tokens.length === 1) {
+    const t0 = tokens[0];
+    if (t0 === "milk" && !["dairy", "beverages"].includes(category)) return -1;
+    if (t0 === "banana" && category !== "fruit_veg") return -1;
+    if (t0 === "rice" && !["pantry", "beverages"].includes(category)) return -1;
+  }
+
+  if (tokens.includes("milk") && hasNonGroceryWord) return -1;
+
+  if (hasFoodIntent && category === "dairy") score += 60;
+  if (hasFoodIntent && category === "household") score -= 120;
+  if (hasFoodIntent && hasNonGroceryWord) score -= 140;
+
+  if (tokens.includes("milk")) {
+    const sizeNorm = normalizeText(size);
+    const likelyDrinkPack = /(ml| l | litre| liter|1l|2l|3l)/.test(" " + sizeNorm + " " );
+    const inName = hasToken(nameNorm, "milk");
+    if (!inName) return -1;
+    const dairyish = category === "dairy" || inName;
+    if (dairyish && likelyDrinkPack) score += 80;
+    if (hasNonGroceryWord && !likelyDrinkPack) score -= 180;
+  }
+
+  return score;
+}
+
+function rankAndFilterOffers(offers, query) {
+  const tokens = queryTokens(query);
+  const ranked = [];
+
+  for (const offer of offers) {
+    const score = scoreOfferForQuery(offer, query, tokens);
+    if (score < 0) continue;
+    ranked.push({ ...offer, relevance_score: score });
+  }
+
+  ranked.sort((a, b) => {
+    if (b.relevance_score !== a.relevance_score) return b.relevance_score - a.relevance_score;
+    const pa = Number.isFinite(a.current_price) ? a.current_price : Number.POSITIVE_INFINITY;
+    const pb = Number.isFinite(b.current_price) ? b.current_price : Number.POSITIVE_INFINITY;
+    return pa - pb;
+  });
+
+  return ranked;
+}
+
 function sanitizeAldiLimit(limit) {
   const n = clamp(parseNumber(limit, 12), 1, 60);
   if (ALDI_AU_ALLOWED_LIMITS.includes(n)) return n;
@@ -263,14 +366,39 @@ function normalizeOffer(item, store, source = "api") {
   return offer;
 }
 
-function offerMatchKey(offer) {
-  const name = normalizeText(offer.product_name)
-    .replace(/\b(pack|pk|each|ea)\b/g, "")
-    .trim();
-  const size = normalizeText(offer.product_size || "");
-  return `${name}|${size}`;
+function compareByUnitOrPrice(a, b) {
+  const aSize = String(a.product_size || "").toLowerCase();
+  const bSize = String(b.product_size || "").toLowerCase();
+  const aUnit = /(kg|\d+\s*g\b|\bg\b)/.test(aSize) ? "kg" : /(ml|\d+\s*l\b|\bl\b)/.test(aSize) ? "l" : null;
+  const bUnit = /(kg|\d+\s*g\b|\bg\b)/.test(bSize) ? "kg" : /(ml|\d+\s*l\b|\bl\b)/.test(bSize) ? "l" : null;
+
+  const aUnitPrice = parsePriceValue(a.unit_price);
+  const bUnitPrice = parsePriceValue(b.unit_price);
+  if (Number.isFinite(aUnitPrice) && Number.isFinite(bUnitPrice) && aUnit && bUnit && aUnit === bUnit) {
+    return aUnitPrice - bUnitPrice;
+  }
+
+  const pa = Number.isFinite(a.current_price) ? a.current_price : Number.POSITIVE_INFINITY;
+  const pb = Number.isFinite(b.current_price) ? b.current_price : Number.POSITIVE_INFINITY;
+  return pa - pb;
 }
 
+function offerMatchKey(offer) {
+  const text = normalizeText(`${offer.product_name || ""} ${offer.product_brand || ""}`)
+    .replace(/\b(coles|woolworths|aldi|brand|original|classic|value|pack|pk|each|ea)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const tokens = text
+    .split(" ")
+    .filter((t) => t && t.length > 1 && !/^\d+$/.test(t))
+    .sort()
+    .slice(0, 6);
+
+  const sizeText = normalizeText(offer.product_size || "");
+  const unit = /(kg|\d+\s*g\b|\bg\b)/.test(sizeText) ? "kg" : /(ml|\d+\s*l\b|\bl\b)/.test(sizeText) ? "l" : "na";
+  return `${tokens.join("_")}|${unit}`;
+}
 async function fetchColesProductSearch(query, page) {
   const apiKey = getApiKey("coles");
   if (!apiKey) return { ok: false, status: 500, data: { error: "Missing RAPIDAPI key for Coles" } };
@@ -452,11 +580,7 @@ function buildComparison(offers, limit) {
 
   const compared = [];
   for (const group of grouped.values()) {
-    group.offers.sort((a, b) => {
-      const pa = Number.isFinite(a.current_price) ? a.current_price : Number.POSITIVE_INFINITY;
-      const pb = Number.isFinite(b.current_price) ? b.current_price : Number.POSITIVE_INFINITY;
-      return pa - pb;
-    });
+    group.offers.sort(compareByUnitOrPrice);
 
     const best = group.offers.find((o) => Number.isFinite(o.current_price)) || null;
     const max = [...group.offers].reverse().find((o) => Number.isFinite(o.current_price)) || null;
@@ -630,7 +754,8 @@ async function handleCombinedSearch(req, res) {
 
   try {
     const { offers, stores } = await collectStoreOffers(q, limit);
-    const filteredOffers = filterOffersByCategory(offers, category);
+    const categoryFiltered = filterOffersByCategory(offers, category);
+    const filteredOffers = rankAndFilterOffers(categoryFiltered, q);
     const comparisons = buildComparison(filteredOffers, limit);
     const visibleOffers = buildVisibleOffers(filteredOffers, limit * 8);
 

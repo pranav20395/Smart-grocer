@@ -8,6 +8,10 @@ const state = {
   compareSummary: null,
   newsResults: [],
   outletsResults: [],
+  recentSearches: [],
+  priceHistory: [],
+  budget: { amount: null, period: "weekly" },
+  routeData: null,
   user: null,
   guestMode: false,
   cloudEnabled: false,
@@ -35,6 +39,8 @@ const els = {
   compareCategory: document.getElementById("compare-category"),
   cheapestOnly: document.getElementById("cheapest-only"),
   colesSearchStatus: document.getElementById("coles-search-status"),
+  compareLoading: document.getElementById("compare-loading"),
+  recentSearches: document.getElementById("recent-searches"),
   compareSummary: document.getElementById("compare-summary"),
   colesSearchResults: document.getElementById("coles-search-results"),
   newsForm: document.getElementById("news-form"),
@@ -52,7 +58,15 @@ const els = {
   itemName: document.getElementById("item-name"),
   itemCategory: document.getElementById("item-category"),
   itemQuantity: document.getElementById("item-quantity"),
+  itemTargetPrice: document.getElementById("item-target-price"),
   shoppingList: document.getElementById("shopping-list"),
+  budgetForm: document.getElementById("budget-form"),
+  budgetAmount: document.getElementById("budget-amount"),
+  budgetPeriod: document.getElementById("budget-period"),
+  budgetStatus: document.getElementById("budget-status"),
+  routePlan: document.getElementById("route-plan"),
+  routeSummary: document.getElementById("route-summary"),
+  priceHistoryInsights: document.getElementById("price-history-insights"),
   priceForm: document.getElementById("price-form"),
   priceItem: document.getElementById("price-item"),
   priceStore: document.getElementById("price-store"),
@@ -63,6 +77,7 @@ const els = {
 
 let supabaseClient = null;
 let cloudSaveTimer = null;
+let cloudRetryTimer = null;
 
 function uid() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -81,6 +96,71 @@ function escapeHtml(text) {
     .replace(/'/g, "&#39;");
 }
 
+
+function normalizeMatchName(name) {
+  return String(name || "")
+    .toLowerCase()
+    .replace(/\b(coles|woolworths|aldi|brand|original|classic|value)\b/g, " ")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parseUnitInfo(sizeText) {
+  const s = String(sizeText || "").toLowerCase();
+  if (!s) return null;
+
+  const packMatch = s.match(/(\d+)\s*x\s*([0-9]+(?:\.[0-9]+)?)\s*(kg|g|l|ml)\b/);
+  let amount;
+  let unit;
+  if (packMatch) {
+    amount = Number(packMatch[1]) * Number(packMatch[2]);
+    unit = packMatch[3];
+  } else {
+    const match = s.match(/([0-9]+(?:\.[0-9]+)?)\s*(kg|g|l|ml)\b/);
+    if (!match) return null;
+    amount = Number(match[1]);
+    unit = match[2];
+  }
+
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+
+  if (unit === "g") return { baseQty: amount / 1000, baseUnit: "kg" };
+  if (unit === "kg") return { baseQty: amount, baseUnit: "kg" };
+  if (unit === "ml") return { baseQty: amount / 1000, baseUnit: "l" };
+  if (unit === "l") return { baseQty: amount, baseUnit: "l" };
+
+  return null;
+}
+
+function getOfferUnitPrice(offer) {
+  const price = Number(offer.current_price);
+  if (!Number.isFinite(price) || price <= 0) return null;
+  const parsed = parseUnitInfo(offer.product_size);
+  if (!parsed || !Number.isFinite(parsed.baseQty) || parsed.baseQty <= 0) return null;
+  return {
+    unitPrice: Number((price / parsed.baseQty).toFixed(2)),
+    unitLabel: parsed.baseUnit
+  };
+}
+
+function addRecentSearch(query) {
+  const q = String(query || "").trim();
+  if (!q) return;
+  state.recentSearches = [q, ...state.recentSearches.filter((x) => x.toLowerCase() !== q.toLowerCase())].slice(0, 8);
+  saveLocal();
+}
+
+function findMatchingItemByName(name) {
+  const target = normalizeMatchName(name);
+  if (!target) return null;
+
+  return state.items.find((item) => {
+    const n = normalizeMatchName(item.name);
+    return n === target || n.includes(target) || target.includes(n);
+  }) || null;
+}
+
 function loadLocal() {
   const raw = localStorage.getItem(STORAGE_KEY);
   if (!raw) return;
@@ -88,14 +168,31 @@ function loadLocal() {
     const parsed = JSON.parse(raw);
     state.items = Array.isArray(parsed.items) ? parsed.items : [];
     state.prices = Array.isArray(parsed.prices) ? parsed.prices : [];
+    state.recentSearches = Array.isArray(parsed.recentSearches) ? parsed.recentSearches : [];
+    state.priceHistory = Array.isArray(parsed.priceHistory) ? parsed.priceHistory : [];
+    state.budget = parsed.budget && typeof parsed.budget === "object"
+      ? { amount: Number.isFinite(Number(parsed.budget.amount)) ? Number(parsed.budget.amount) : null, period: parsed.budget.period || "weekly" }
+      : { amount: null, period: "weekly" };
   } catch {
     state.items = [];
     state.prices = [];
+    state.recentSearches = [];
+    state.priceHistory = [];
+    state.budget = { amount: null, period: "weekly" };
   }
 }
 
 function saveLocal() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ items: state.items, prices: state.prices }));
+  localStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify({
+      items: state.items,
+      prices: state.prices,
+      recentSearches: state.recentSearches,
+      priceHistory: state.priceHistory,
+      budget: state.budget
+    })
+  );
 }
 
 function save() {
@@ -334,12 +431,32 @@ function scheduleCloudSave() {
     try {
       await saveCloudData();
       updateAuthUI();
+      if (cloudRetryTimer) {
+        clearTimeout(cloudRetryTimer);
+        cloudRetryTimer = null;
+      }
     } catch (error) {
       state.cloudSyncError = error.message || "Cloud sync failed";
       updateAuthUI();
       console.error("Cloud sync failed", error);
+      scheduleCloudRetry();
     }
   }, 500);
+}
+
+function scheduleCloudRetry() {
+  if (!state.user || !supabaseClient || cloudRetryTimer) return;
+  cloudRetryTimer = setTimeout(async () => {
+    cloudRetryTimer = null;
+    try {
+      await saveCloudData();
+      updateAuthUI();
+    } catch (error) {
+      state.cloudSyncError = error.message || "Cloud sync retry failed";
+      updateAuthUI();
+      scheduleCloudRetry();
+    }
+  }, 5000);
 }
 
 async function loadCloudData() {
@@ -383,17 +500,27 @@ async function loadCloudData() {
   state.cloudSyncError = null;
 }
 
-function addItem(name, category, quantity) {
-  const cleanName = name.trim();
-  const existing = state.items.find((x) => x.name.toLowerCase() === cleanName.toLowerCase());
-  if (existing) return existing;
+function addItem(name, category, quantity, targetPrice = null) {
+  const cleanName = String(name || "").trim();
+  if (!cleanName) return null;
+
+  const existing = state.items.find((x) => x.name.toLowerCase() === cleanName.toLowerCase()) || findMatchingItemByName(cleanName);
+  if (existing) {
+    if (Number.isFinite(Number(targetPrice))) {
+      existing.targetPrice = Number(targetPrice);
+      save();
+      render();
+    }
+    return existing;
+  }
 
   const item = {
     id: uid(),
     name: cleanName,
-    category: category.trim() || "General",
+    category: String(category || "").trim() || "General",
     quantity,
-    done: false
+    done: false,
+    targetPrice: Number.isFinite(Number(targetPrice)) ? Number(targetPrice) : null
   };
   state.items.push(item);
   save();
@@ -417,8 +544,22 @@ function setPrice(itemId, store, price, source) {
       updatedAt: new Date().toISOString()
     });
   }
+
+  const item = state.items.find((x) => x.id === itemId);
+  if (item) {
+    state.priceHistory.push({
+      id: uid(),
+      itemId,
+      itemName: item.name,
+      store,
+      price,
+      at: new Date().toISOString()
+    });
+    state.priceHistory = state.priceHistory.slice(-1200);
+  }
+
   save();
-  renderComparison();
+  render();
 }
 
 function toggleItem(itemId) {
@@ -449,7 +590,8 @@ function renderItems() {
 
     const label = document.createElement("span");
     label.className = item.done ? "done" : "";
-    label.textContent = `${item.name} (${item.category}) x${item.quantity}`;
+    const targetTag = Number.isFinite(Number(item.targetPrice)) ? ` | target ${formatMoney(Number(item.targetPrice))}` : "";
+    label.textContent = `${item.name} (${item.category}) x${item.quantity}${targetTag}`;
 
     const actions = document.createElement("div");
     actions.className = "actions";
@@ -503,14 +645,18 @@ function calculateCheapestPlan() {
   const storeTotals = {};
 
   for (const item of activeItems) {
-    const itemPrices = state.prices.filter((p) => p.itemId === item.id);
+    const itemPrices = state.prices
+      .filter((p) => p.itemId === item.id && Number.isFinite(Number(p.price)))
+      .sort((a, b) => Number(a.price) - Number(b.price));
+
     if (itemPrices.length === 0) {
-      rows.push({ type: "missing", item });
+      rows.push({ type: "missing", item, options: [] });
       continue;
     }
-    const cheapest = itemPrices.reduce((a, b) => (a.price <= b.price ? a : b));
-    mixedTotal += cheapest.price * item.quantity;
-    rows.push({ type: "best", item, ...cheapest });
+
+    const cheapest = itemPrices[0];
+    mixedTotal += Number(cheapest.price) * item.quantity;
+    rows.push({ type: "best", item, ...cheapest, options: itemPrices });
   }
 
   const stores = [...new Set(state.prices.map((x) => x.store))];
@@ -519,16 +665,16 @@ function calculateCheapestPlan() {
     let complete = true;
     for (const item of activeItems) {
       const p = state.prices.find((x) => x.itemId === item.id && x.store === store);
-      if (!p) {
+      if (!p || !Number.isFinite(Number(p.price))) {
         complete = false;
         break;
       }
-      total += p.price * item.quantity;
+      total += Number(p.price) * item.quantity;
     }
-    if (complete) storeTotals[store] = total;
+    if (complete) storeTotals[store] = Number(total.toFixed(2));
   }
 
-  return { rows, mixedTotal, storeTotals, activeCount: activeItems.length };
+  return { rows, mixedTotal: Number(mixedTotal.toFixed(2)), storeTotals, activeCount: activeItems.length };
 }
 
 function renderComparison() {
@@ -613,6 +759,22 @@ function renderComparison() {
     const missingList = missingRows.map((row) => `<li>${escapeHtml(row.item.name)} x${row.item.quantity}</li>`).join("");
     els.comparison.innerHTML += `<div class='row'><strong>Need prices:</strong><ul class='missing-list'>${missingList}</ul></div>`;
   }
+
+  const swapRows = rows
+    .filter((row) => row.type === "best" && Array.isArray(row.options) && row.options.length > 1)
+    .map((row) => {
+      const second = row.options[1];
+      const save = Number(second.price) - Number(row.price);
+      if (!Number.isFinite(save) || save <= 0) return "";
+      return `<li>${escapeHtml(row.item.name)}: choose <strong>${escapeHtml(row.store)}</strong> over ${escapeHtml(second.store)} and save ${formatMoney(save * row.item.quantity)}</li>`;
+    })
+    .filter(Boolean)
+    .slice(0, 6)
+    .join("");
+
+  if (swapRows) {
+    els.comparison.innerHTML += `<div class='row'><strong>Swap to cheaper alternatives:</strong><ul class='missing-list'>${swapRows}</ul></div>`;
+  }
 }
 
 async function searchCombinedProductCosts(query, limit, category) {
@@ -670,6 +832,195 @@ function renderCompareSummary() {
   els.compareSummary.innerHTML = `<div class='row'><strong>Store APIs:</strong> ${storeText || "N/A"}</div>${rows}`;
 }
 
+function renderRecentSearches() {
+  if (!els.recentSearches) return;
+  if (!state.recentSearches.length) {
+    els.recentSearches.innerHTML = "";
+    return;
+  }
+
+  const chips = state.recentSearches
+    .map((q) => `<button type='button' class='chip-btn' data-search='${escapeHtml(q)}'>${escapeHtml(q)}</button>`)
+    .join("");
+  els.recentSearches.innerHTML = `<div class='chip-row'>${chips}</div>`;
+}
+
+function renderBudgetStatus() {
+  if (!els.budgetStatus) return;
+  const amount = Number(state.budget?.amount);
+  const period = state.budget?.period || "weekly";
+  const { mixedTotal } = calculateCheapestPlan();
+
+  if (!Number.isFinite(amount) || amount <= 0) {
+    els.budgetStatus.textContent = "Set a budget to track overspend alerts.";
+    return;
+  }
+
+  const diff = Number((amount - mixedTotal).toFixed(2));
+  if (diff >= 0) {
+    els.budgetStatus.textContent = `Within ${period} budget. Remaining: ${formatMoney(diff)}.`;
+  } else {
+    els.budgetStatus.textContent = `Over ${period} budget by ${formatMoney(Math.abs(diff))}. Use swap hints below.`;
+  }
+}
+
+function renderPriceHistoryInsights() {
+  if (!els.priceHistoryInsights) return;
+  const activeItems = state.items.filter((x) => !x.done);
+  if (activeItems.length === 0) {
+    els.priceHistoryInsights.innerHTML = "<div class='row'>No active items for history insights.</div>";
+    return;
+  }
+
+  const now = Date.now();
+  const dayMs = 24 * 60 * 60 * 1000;
+
+  const rows = activeItems
+    .map((item) => {
+      const history = state.priceHistory.filter((h) => h.itemId === item.id);
+      if (!history.length) return `<div class='row'>${escapeHtml(item.name)}: no history yet.</div>`;
+
+      const latest = history[history.length - 1];
+      const prices = history.map((h) => Number(h.price)).filter((p) => Number.isFinite(p));
+      const min = Math.min(...prices);
+      const max = Math.max(...prices);
+      const d7 = history.filter((h) => now - new Date(h.at).getTime() <= 7 * dayMs).length;
+      const d30 = history.filter((h) => now - new Date(h.at).getTime() <= 30 * dayMs).length;
+      const d90 = history.filter((h) => now - new Date(h.at).getTime() <= 90 * dayMs).length;
+
+      const sorted = [...history].sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+      const graphPoints = sorted.slice(-12).map((h) => Number(h.price)).filter((p) => Number.isFinite(p));
+      const maxPoint = graphPoints.length ? Math.max(...graphPoints) : 0;
+      const minPoint = graphPoints.length ? Math.min(...graphPoints) : 0;
+      const range = Math.max(maxPoint - minPoint, 0.01);
+      const bars = graphPoints
+        .map((p) => {
+          const h = 24 + ((p - minPoint) / range) * 56;
+          return `<span style="height:${h.toFixed(0)}%"></span>`;
+        })
+        .join("");
+
+      const target = Number(item.targetPrice);
+      const targetHit = Number.isFinite(target) && Number(latest.price) <= target;
+      const targetText = Number.isFinite(target)
+        ? targetHit
+          ? ` | target reached (${formatMoney(target)})`
+          : ` | target ${formatMoney(target)}`
+        : "";
+
+      const avgByStore = history.reduce((acc, row) => {
+        const key = String(row.store || "Unknown");
+        if (!acc[key]) acc[key] = [];
+        acc[key].push(Number(row.price));
+        return acc;
+      }, {});
+
+      const bestStore = Object.entries(avgByStore)
+        .map(([store, values]) => ({
+          store,
+          avg: values.reduce((sum, v) => sum + v, 0) / values.length
+        }))
+        .sort((a, b) => a.avg - b.avg)[0];
+
+      const avgByDay = history.reduce((acc, row) => {
+        const day = new Date(row.at).toLocaleDateString("en-AU", { weekday: "short" });
+        if (!acc[day]) acc[day] = [];
+        acc[day].push(Number(row.price));
+        return acc;
+      }, {});
+
+      const bestDay = Object.entries(avgByDay)
+        .map(([day, values]) => ({
+          day,
+          avg: values.reduce((sum, v) => sum + v, 0) / values.length
+        }))
+        .sort((a, b) => a.avg - b.avg)[0];
+
+      const hint = [bestStore ? `Best store: ${bestStore.store}` : null, bestDay ? `Best day: ${bestDay.day}` : null]
+        .filter(Boolean)
+        .join(" | ");
+
+      return `<div class='row'>
+        <strong>${escapeHtml(item.name)}</strong><br/>
+        Latest: ${formatMoney(Number(latest.price))} at ${escapeHtml(latest.store)} | Min: ${formatMoney(min)} | Max: ${formatMoney(max)}${targetText}<br/>
+        Samples: 7d ${d7} | 30d ${d30} | 90d ${d90}<br/>
+        ${hint ? `<span class='history-hint'>${escapeHtml(hint)}</span>` : ""}
+        ${bars ? `<div class='sparkline' aria-label='Recent trend'>${bars}</div>` : ""}
+      </div>`;
+    })
+    .join("");
+
+  els.priceHistoryInsights.innerHTML = rows;
+}
+
+function buildStoreTripGroups() {
+  const { rows } = calculateCheapestPlan();
+  const byStore = new Map();
+  for (const row of rows) {
+    if (row.type !== "best") continue;
+    if (!byStore.has(row.store)) byStore.set(row.store, []);
+    byStore.get(row.store).push(row);
+  }
+  return byStore;
+}
+
+function markStoreTripBought(store) {
+  const groups = buildStoreTripGroups();
+  const rows = groups.get(store) || [];
+  const itemIds = new Set(rows.map((r) => r.item.id));
+  state.items.forEach((item) => {
+    if (itemIds.has(item.id)) item.done = true;
+  });
+  save();
+  render();
+}
+
+async function planRouteForTrips() {
+  if (!navigator.geolocation) throw new Error("Geolocation not supported.");
+  const pos = await new Promise((resolve, reject) =>
+    navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 })
+  );
+
+  const payload = await fetchNearbyOutlets(pos.coords.latitude, pos.coords.longitude, Number(els.outletsRadius?.value || 8), 30);
+  const byStore = buildStoreTripGroups();
+
+  const routeRows = [];
+  for (const [store, items] of byStore.entries()) {
+    const nearest = (payload.results || []).find((x) => String(x.store).toLowerCase() === store.toLowerCase());
+    const maps = nearest
+      ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${nearest.latitude},${nearest.longitude}`)}`
+      : null;
+
+    routeRows.push({
+      store,
+      count: items.length,
+      nearest,
+      maps
+    });
+  }
+
+  state.routeData = routeRows;
+  renderRouteSummary();
+}
+
+function renderRouteSummary() {
+  if (!els.routeSummary) return;
+  if (!Array.isArray(state.routeData) || state.routeData.length === 0) {
+    els.routeSummary.innerHTML = "";
+    return;
+  }
+
+  const rows = state.routeData
+    .map((r) => {
+      const where = r.nearest ? `${escapeHtml(r.nearest.name)} (${Number(r.nearest.distance_km).toFixed(1)} km)` : "No outlet found";
+      const mapLink = r.maps ? `<a href='${r.maps}' target='_blank' rel='noreferrer'>Open Map</a>` : "";
+      return `<div class='row'><strong>${escapeHtml(r.store)}:</strong> ${r.count} item(s) | ${where} ${mapLink} <button data-action='mark-store-bought' data-store='${escapeHtml(r.store)}'>Mark All Bought</button></div>`;
+    })
+    .join("");
+
+  els.routeSummary.innerHTML = `<h4>Trip Route Summary</h4>${rows}`;
+}
+
 function offerKey(offer) {
   const name = String(offer.product_name || "")
     .toLowerCase()
@@ -688,7 +1039,14 @@ function getVisibleOffers() {
   const category = els.compareCategory?.value || "all";
   const cheapestOnly = Boolean(els.cheapestOnly?.checked);
 
-  let list = [...state.searchOffers];
+  let list = [...state.searchOffers].map((o) => {
+    const unitInfo = getOfferUnitPrice(o);
+    return {
+      ...o,
+      unit_price: unitInfo ? unitInfo.unitPrice : null,
+      unit_label: unitInfo ? unitInfo.unitLabel : null
+    };
+  });
   if (store !== "all") {
     list = list.filter((o) => (o.store || "").toLowerCase() === store.toLowerCase());
   }
@@ -723,6 +1081,11 @@ function getVisibleOffers() {
     if (sortBy === "price_desc") return bv - av;
     if (sortBy === "name_asc") return String(a.product_name || "").localeCompare(String(b.product_name || ""));
     if (sortBy === "store_asc") return String(a.store || "").localeCompare(String(b.store || ""));
+    if (sortBy === "unit_price_asc") {
+      const ua = Number.isFinite(Number(a.unit_price)) ? Number(a.unit_price) : Number.POSITIVE_INFINITY;
+      const ub = Number.isFinite(Number(b.unit_price)) ? Number(b.unit_price) : Number.POSITIVE_INFINITY;
+      return ua - ub;
+    }
     return av - bv;
   });
 
@@ -743,6 +1106,7 @@ function renderSearchOffers() {
     .map((item, idx) => {
       const price = Number(item.current_price);
       const priceTxt = Number.isFinite(price) ? formatMoney(price) : "N/A";
+      const unitTxt = Number.isFinite(Number(item.unit_price)) ? `${formatMoney(Number(item.unit_price))} / ${item.unit_label}` : "N/A";
       const link = item.url ? `<a href='${item.url}' target='_blank' rel='noreferrer'>Open</a>` : "No link";
       return `<tr>
         <td>${item.product_name || "Unknown"}</td>
@@ -751,6 +1115,7 @@ function renderSearchOffers() {
         <td>${item.category || "other"}</td>
         <td>${item.product_size || "N/A"}</td>
         <td>${priceTxt}</td>
+        <td>${unitTxt}</td>
         <td>${link}</td>
         <td>
           <button data-action='add-item' data-index='${idx}'>Add Item</button>
@@ -769,6 +1134,7 @@ function renderSearchOffers() {
         <th>Category</th>
         <th>Size</th>
         <th>Price</th>
+        <th>Unit Price</th>
         <th>Link</th>
         <th>Actions</th>
       </tr>
@@ -864,10 +1230,16 @@ function render() {
   renderItems();
   renderPriceItemOptions();
   renderComparison();
+  renderBudgetStatus();
+  renderPriceHistoryInsights();
+  renderRouteSummary();
   renderSearchOffers();
+  renderRecentSearches();
   renderCompareSummary();
   renderNewsResults();
   renderOutletsResults();
+  if (els.budgetAmount) els.budgetAmount.value = Number.isFinite(Number(state.budget?.amount)) ? String(state.budget.amount) : "";
+  if (els.budgetPeriod) els.budgetPeriod.value = state.budget?.period || "weekly";
   updateAuthUI();
 }
 
@@ -911,6 +1283,7 @@ els.authSignOut?.addEventListener("click", async () => {
     }
     state.user = null;
     state.guestMode = false;
+    setRouteMode("login");
     updateAuthUI();
   } catch (error) {
     setAuthStatus(`Sign out failed: ${error.message}`);
@@ -932,6 +1305,7 @@ window.addEventListener("hashchange", () => {
   const mode = getRouteMode();
   if (mode === "app" && (state.user || state.guestMode)) {
     setShellVisibility(true);
+    render();
   } else if (mode === "login") {
     setShellVisibility(false);
   }
@@ -946,12 +1320,15 @@ els.colesSearchForm.addEventListener("submit", async (e) => {
   if (!query || !Number.isFinite(limit) || limit < 1) return;
 
   try {
+    if (els.compareLoading) els.compareLoading.hidden = false;
     els.colesSearchStatus.textContent = "Comparing prices across stores...";
     const category = els.compareCategory?.value || "all";
     const payload = await searchCombinedProductCosts(query, limit, category);
     state.searchOffers = Array.isArray(payload.offers) ? payload.offers : [];
     state.compareSummary = payload;
+    addRecentSearch(payload.query || query);
     renderSearchOffers();
+    renderRecentSearches();
     renderCompareSummary();
     const catLabel = (payload.category || "all").replace("_", " ");
     els.colesSearchStatus.textContent = `Showing ${state.visibleOffers.length} of ${state.searchOffers.length} offers for "${payload.query}" in ${catLabel}.`;
@@ -962,6 +1339,8 @@ els.colesSearchForm.addEventListener("submit", async (e) => {
     renderSearchOffers();
     renderCompareSummary();
     els.colesSearchStatus.textContent = `Search failed: ${err.message}`;
+  } finally {
+    if (els.compareLoading) els.compareLoading.hidden = true;
   }
 });
 
@@ -969,6 +1348,15 @@ function refreshOfferViewStatus() {
   if (!state.searchOffers.length) return;
   els.colesSearchStatus.textContent = `Showing ${state.visibleOffers.length} of ${state.searchOffers.length} offers.`;
 }
+
+els.recentSearches?.addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-search]");
+  if (!btn) return;
+  const q = String(btn.dataset.search || "").trim();
+  if (!q) return;
+  els.colesSearchQuery.value = q;
+  els.colesSearchForm.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
+});
 
 els.compareSort?.addEventListener("change", () => {
   renderSearchOffers();
@@ -1096,9 +1484,10 @@ els.itemForm.addEventListener("submit", (e) => {
   const name = els.itemName.value;
   const category = els.itemCategory.value;
   const quantity = Number(els.itemQuantity.value);
+  const targetPrice = Number(els.itemTargetPrice?.value);
   if (!name.trim() || !Number.isFinite(quantity) || quantity < 1) return;
 
-  addItem(name, category, quantity);
+  addItem(name, category, quantity, Number.isFinite(targetPrice) ? targetPrice : null);
   els.itemForm.reset();
   els.itemQuantity.value = "1";
 });
@@ -1117,6 +1506,39 @@ if (els.priceForm) {
 }
 
 els.recalculate.addEventListener("click", renderComparison);
+
+els.budgetForm?.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const amount = Number(els.budgetAmount?.value);
+  const period = String(els.budgetPeriod?.value || "weekly");
+  state.budget = {
+    amount: Number.isFinite(amount) && amount > 0 ? amount : null,
+    period: period === "monthly" ? "monthly" : "weekly"
+  };
+  save();
+  renderBudgetStatus();
+});
+
+els.routePlan?.addEventListener("click", async () => {
+  try {
+    if (els.routeSummary) els.routeSummary.innerHTML = "<div class='row'>Building route using your location...</div>";
+    await planRouteForTrips();
+  } catch (error) {
+    if (els.routeSummary) els.routeSummary.innerHTML = `<div class='row'>Route planning failed: ${escapeHtml(error.message)}</div>`;
+  }
+});
+
+els.routeSummary?.addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-action='mark-store-bought']");
+  if (!btn) return;
+  const store = String(btn.dataset.store || "");
+  if (!store) return;
+  markStoreTripBought(store);
+});
+
+window.addEventListener("online", () => {
+  if (state.user && supabaseClient) scheduleCloudSave();
+});
 
 async function bootstrap() {
   loadLocal();
