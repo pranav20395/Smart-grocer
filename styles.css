@@ -190,6 +190,30 @@ button:hover {
   margin-top: 0.75rem;
 }
 
+.auth-links {
+  margin-top: 0.45rem;
+}
+
+.link-btn {
+  margin-top: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--accent-2);
+  font-weight: 600;
+}
+
+.link-btn:hover {
+  background: transparent;
+  color: var(--accent);
+}
+
+.recovery-form {
+  margin-top: 0.85rem;
+  padding-top: 0.85rem;
+  border-top: 1px dashed var(--line);
+}
+
 .secondary {
   background: #e6efeb;
   color: #1f3730;

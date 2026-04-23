@@ -1,4 +1,5 @@
-const STORAGE_KEY = "aussie-saver-v1";
+const LEGACY_STORAGE_KEY = "aussie-saver-v1";
+const STORAGE_PREFIX = "aussie-saver-v2";
 
 const state = {
   items: [],
@@ -14,6 +15,7 @@ const state = {
   routeData: null,
   user: null,
   guestMode: false,
+  recoveryMode: false,
   cloudEnabled: false,
   cloudSyncError: null,
   lastCloudSyncAt: null
@@ -28,8 +30,14 @@ const els = {
   authSignIn: document.getElementById("auth-signin"),
   authSignUp: document.getElementById("auth-signup"),
   authGuest: document.getElementById("auth-guest"),
+  authReset: document.getElementById("auth-reset"),
   authSignOut: document.getElementById("auth-signout"),
   authStatus: document.getElementById("auth-status"),
+  recoveryForm: document.getElementById("recovery-form"),
+  recoveryPassword: document.getElementById("recovery-password"),
+  recoveryPasswordConfirm: document.getElementById("recovery-password-confirm"),
+  recoverySave: document.getElementById("recovery-save"),
+  recoveryCancel: document.getElementById("recovery-cancel"),
   topNav: document.getElementById("top-nav"),
   colesSearchForm: document.getElementById("coles-search-form"),
   colesSearchQuery: document.getElementById("coles-search-query"),
@@ -161,30 +169,78 @@ function findMatchingItemByName(name) {
   }) || null;
 }
 
-function loadLocal() {
-  const raw = localStorage.getItem(STORAGE_KEY);
+function emptySessionData() {
+  return {
+    items: [],
+    prices: [],
+    recentSearches: [],
+    priceHistory: [],
+    budget: { amount: null, period: "weekly" }
+  };
+}
+
+function resetSessionData() {
+  const empty = emptySessionData();
+  state.items = empty.items;
+  state.prices = empty.prices;
+  state.recentSearches = empty.recentSearches;
+  state.priceHistory = empty.priceHistory;
+  state.budget = empty.budget;
+  state.routeData = null;
+  state.outletsResults = [];
+}
+
+function hydrateSessionData(parsed) {
+  state.items = Array.isArray(parsed.items) ? parsed.items : [];
+  state.prices = Array.isArray(parsed.prices) ? parsed.prices : [];
+  state.recentSearches = Array.isArray(parsed.recentSearches) ? parsed.recentSearches : [];
+  state.priceHistory = Array.isArray(parsed.priceHistory) ? parsed.priceHistory : [];
+  state.budget = parsed.budget && typeof parsed.budget === "object"
+    ? {
+        amount: Number.isFinite(Number(parsed.budget.amount)) ? Number(parsed.budget.amount) : null,
+        period: parsed.budget.period || "weekly"
+      }
+    : { amount: null, period: "weekly" };
+  state.routeData = null;
+}
+
+function getGuestStorageKey() {
+  return `${STORAGE_PREFIX}:guest`;
+}
+
+function getUserStorageKey(userId) {
+  return `${STORAGE_PREFIX}:user:${userId}`;
+}
+
+function getActiveStorageKey() {
+  if (state.user?.id) return getUserStorageKey(state.user.id);
+  if (state.guestMode) return getGuestStorageKey();
+  return null;
+}
+
+function migrateLegacyStorage() {
+  const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
+  if (!legacy || localStorage.getItem(getGuestStorageKey())) return;
+  localStorage.setItem(getGuestStorageKey(), legacy);
+}
+
+function loadLocal(storageKey = getActiveStorageKey()) {
+  resetSessionData();
+  if (!storageKey) return;
+  const raw = localStorage.getItem(storageKey);
   if (!raw) return;
   try {
     const parsed = JSON.parse(raw);
-    state.items = Array.isArray(parsed.items) ? parsed.items : [];
-    state.prices = Array.isArray(parsed.prices) ? parsed.prices : [];
-    state.recentSearches = Array.isArray(parsed.recentSearches) ? parsed.recentSearches : [];
-    state.priceHistory = Array.isArray(parsed.priceHistory) ? parsed.priceHistory : [];
-    state.budget = parsed.budget && typeof parsed.budget === "object"
-      ? { amount: Number.isFinite(Number(parsed.budget.amount)) ? Number(parsed.budget.amount) : null, period: parsed.budget.period || "weekly" }
-      : { amount: null, period: "weekly" };
+    hydrateSessionData(parsed);
   } catch {
-    state.items = [];
-    state.prices = [];
-    state.recentSearches = [];
-    state.priceHistory = [];
-    state.budget = { amount: null, period: "weekly" };
+    resetSessionData();
   }
 }
 
-function saveLocal() {
+function saveLocal(storageKey = getActiveStorageKey()) {
+  if (!storageKey) return;
   localStorage.setItem(
-    STORAGE_KEY,
+    storageKey,
     JSON.stringify({
       items: state.items,
       prices: state.prices,
@@ -205,6 +261,12 @@ function getSupabaseConfig() {
   const url = config.SUPABASE_URL || "";
   const anon = config.SUPABASE_ANON_KEY || "";
   return { url: String(url).trim(), anon: String(anon).trim() };
+}
+
+function setRecoveryMode(enabled) {
+  state.recoveryMode = enabled;
+  if (els.authForm) els.authForm.hidden = enabled;
+  if (els.recoveryForm) els.recoveryForm.hidden = !enabled;
 }
 
 function setAuthStatus(message) {
@@ -250,11 +312,20 @@ function updateAuthUI() {
   const inApp = signedIn || state.guestMode;
 
   if (els.authSignOut) els.authSignOut.style.display = signedIn ? "inline-block" : "none";
+  setRecoveryMode(state.recoveryMode);
+
+  if (state.recoveryMode) {
+    setRouteMode("login");
+    setShellVisibility(false);
+    return;
+  }
 
   if (!inApp) {
     setRouteMode("login");
     setShellVisibility(false);
-    setAuthStatus(state.cloudEnabled ? "Sign in to sync your data." : "Supabase not configured. Use guest mode.");
+    if (!state.recoveryMode) {
+      setAuthStatus(state.cloudEnabled ? "Sign in to sync your data." : "Supabase not configured. Use guest mode.");
+    }
     return;
   }
 
@@ -291,6 +362,12 @@ async function initSupabase() {
 
   state.user = session?.user || null;
   state.guestMode = false;
+  state.recoveryMode = false;
+  if (state.user) {
+    loadLocal(getUserStorageKey(state.user.id));
+  } else {
+    resetSessionData();
+  }
   updateAuthUI();
 
   if (state.user) {
@@ -303,11 +380,25 @@ async function initSupabase() {
     render();
   }
 
-  supabaseClient.auth.onAuthStateChange(async (_event, sessionData) => {
+  supabaseClient.auth.onAuthStateChange(async (event, sessionData) => {
     state.user = sessionData?.user || null;
     state.guestMode = false;
     state.cloudSyncError = null;
+    state.recoveryMode = event === "PASSWORD_RECOVERY";
+    if (state.user) {
+      loadLocal(getUserStorageKey(state.user.id));
+    } else {
+      resetSessionData();
+    }
     updateAuthUI();
+
+    if (state.recoveryMode) {
+      setRouteMode("login");
+      render();
+      setAuthStatus("Choose a new password to finish recovery.");
+      return;
+    }
+
     if (state.user) {
       try {
         await loadCloudData();
@@ -316,7 +407,10 @@ async function initSupabase() {
         state.cloudSyncError = error.message || "Unable to load cloud data";
       }
       render();
+      return;
     }
+
+    render();
   });
 }
 
@@ -333,9 +427,22 @@ async function signUp(email, password) {
   if (error) throw error;
 }
 
+async function sendPasswordReset(email) {
+  if (!supabaseClient) throw new Error("Supabase not configured.");
+  const redirectTo = `${window.location.origin}${window.location.pathname}`;
+  const { error } = await supabaseClient.auth.resetPasswordForEmail(email, { redirectTo });
+  if (error) throw error;
+}
+
 async function signOut() {
   if (!supabaseClient) return;
   const { error } = await supabaseClient.auth.signOut();
+  if (error) throw error;
+}
+
+async function updatePassword(password) {
+  if (!supabaseClient) throw new Error("Supabase not configured.");
+  const { error } = await supabaseClient.auth.updateUser({ password });
   if (error) throw error;
 }
 
@@ -506,11 +613,13 @@ function addItem(name, category, quantity, targetPrice = null) {
 
   const existing = state.items.find((x) => x.name.toLowerCase() === cleanName.toLowerCase()) || findMatchingItemByName(cleanName);
   if (existing) {
+    existing.quantity = Number(existing.quantity || 1) + Number(quantity || 1);
+    existing.category = String(category || existing.category || "General").trim() || "General";
     if (Number.isFinite(Number(targetPrice))) {
       existing.targetPrice = Number(targetPrice);
-      save();
-      render();
     }
+    save();
+    render();
     return existing;
   }
 
@@ -1265,15 +1374,9 @@ els.authSignIn?.addEventListener("click", async () => {
   if (!email || !password) return;
   try {
     setAuthStatus("Signing in...");
-    const data = await signIn(email, password);
-    if (data?.user) {
-      state.user = data.user;
-      state.guestMode = false;
-      setRouteMode("app");
-      updateAuthUI();
-      render();
-      window.scrollTo({ top: 0, behavior: "instant" });
-    }
+    await signIn(email, password);
+    setAuthStatus("Signed in. Loading your list...");
+    window.scrollTo({ top: 0, behavior: "instant" });
   } catch (error) {
     setAuthStatus(`Sign in failed: ${error.message}`);
   }
@@ -1297,9 +1400,12 @@ els.authSignOut?.addEventListener("click", async () => {
     if (supabaseClient && state.user) {
       await signOut();
     }
+    resetSessionData();
     state.user = null;
     state.guestMode = false;
+    state.recoveryMode = false;
     setRouteMode("login");
+    render();
     updateAuthUI();
   } catch (error) {
     setAuthStatus(`Sign out failed: ${error.message}`);
@@ -1307,7 +1413,67 @@ els.authSignOut?.addEventListener("click", async () => {
 });
 
 els.authGuest?.addEventListener("click", () => {
+  state.user = null;
   state.guestMode = true;
+  state.recoveryMode = false;
+  loadLocal(getGuestStorageKey());
+  setRouteMode("app");
+  render();
+  updateAuthUI();
+});
+
+els.authReset?.addEventListener("click", async () => {
+  const email = els.authEmail.value.trim();
+  if (!email) {
+    setAuthStatus("Enter your email first, then tap Forgot password.");
+    return;
+  }
+
+  try {
+    setAuthStatus("Sending password reset email...");
+    await sendPasswordReset(email);
+    setAuthStatus("Password reset email sent. Open the link from your inbox.");
+  } catch (error) {
+    setAuthStatus(`Password reset failed: ${error.message}`);
+  }
+});
+
+els.recoverySave?.addEventListener("click", async () => {
+  const password = els.recoveryPassword?.value || "";
+  const confirm = els.recoveryPasswordConfirm?.value || "";
+  if (!password || password.length < 6) {
+    setAuthStatus("Use a password with at least 6 characters.");
+    return;
+  }
+  if (password !== confirm) {
+    setAuthStatus("Passwords do not match.");
+    return;
+  }
+
+  try {
+    setAuthStatus("Updating password...");
+    await updatePassword(password);
+    state.recoveryMode = false;
+    if (els.recoveryPassword) els.recoveryPassword.value = "";
+    if (els.recoveryPasswordConfirm) els.recoveryPasswordConfirm.value = "";
+    setRouteMode("app");
+    render();
+    setAuthStatus("Password updated.");
+  } catch (error) {
+    setAuthStatus(`Password update failed: ${error.message}`);
+  }
+});
+
+els.recoveryCancel?.addEventListener("click", async () => {
+  state.recoveryMode = false;
+  if (state.user) {
+    await signOut().catch(() => {});
+  }
+  resetSessionData();
+  state.user = null;
+  state.guestMode = false;
+  setRouteMode("login");
+  render();
   updateAuthUI();
 });
 
@@ -1557,7 +1723,8 @@ window.addEventListener("online", () => {
 });
 
 async function bootstrap() {
-  loadLocal();
+  migrateLegacyStorage();
+  resetSessionData();
   if (!window.location.hash) {
     setRouteMode("login");
   }

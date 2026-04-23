@@ -29,6 +29,26 @@
             <button type="button" id="auth-signup" class="secondary">Create Account</button>
             <button type="button" id="auth-guest" class="ghost">Continue as Guest</button>
           </div>
+          <div class="auth-links">
+            <button type="button" id="auth-reset" class="link-btn">Forgot password?</button>
+          </div>
+        </form>
+
+        <form id="recovery-form" class="recovery-form" hidden>
+          <div class="grid auth-grid">
+            <label>
+              New Password
+              <input id="recovery-password" type="password" placeholder="New password" />
+            </label>
+            <label>
+              Confirm Password
+              <input id="recovery-password-confirm" type="password" placeholder="Repeat password" />
+            </label>
+          </div>
+          <div class="auth-actions">
+            <button type="button" id="recovery-save">Update Password</button>
+            <button type="button" id="recovery-cancel" class="ghost">Back To Login</button>
+          </div>
         </form>
         <div id="auth-status" class="status"></div>
       </div>
